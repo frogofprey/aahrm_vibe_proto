@@ -2,6 +2,7 @@
 export interface HeartRateData {
   hr: number;
   timestamp: string;
+  isAiRequest?: boolean;
 }
 
 export interface MinuteSummary {

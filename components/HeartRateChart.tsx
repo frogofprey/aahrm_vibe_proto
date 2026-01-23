@@ -18,6 +18,22 @@ interface HeartRateChartProps {
   zones: ZoneConfig[];
 }
 
+const CustomDot = (props: any) => {
+  const { cx, cy, payload } = props;
+  
+  if (payload.isAiRequest) {
+    return (
+      <g transform={`translate(${cx},${cy})`}>
+        {/* Background glow to ensure visibility on all zones */}
+        <circle r="6" fill="#000" fillOpacity="0.8" />
+        {/* Cyan X Marker */}
+        <path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" />
+      </g>
+    );
+  }
+  return null;
+};
+
 const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#ff003c', age, zones }) => {
   // Calculate dynamic domain
   const yDomain = useMemo(() => {
@@ -49,6 +65,16 @@ const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#f
            <div className="flex items-center gap-2">
              <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeColor }}></div>
              <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: activeColor }}>Data Relay Active</span>
+           </div>
+           <div className="h-3 w-px bg-white/10" />
+           <div className="flex items-center gap-1.5">
+             <div className="relative w-2 h-2">
+               <div className="absolute inset-0 bg-black rounded-full" />
+               <svg viewBox="0 0 6 6" className="absolute inset-0 w-full h-full text-cyan-400">
+                  <path d="M1 1L5 5M5 1L1 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+               </svg>
+             </div>
+             <span className="text-[9px] text-cyan-400 font-mono uppercase">AI Sync Event</span>
            </div>
            <div className="h-3 w-px bg-white/10" />
            <span className="text-[9px] text-slate-600 font-mono uppercase">Floor: 60 BPM</span>
@@ -105,6 +131,7 @@ const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#f
             fillOpacity={1} 
             fill="url(#colorHr)" 
             isAnimationActive={false}
+            dot={<CustomDot />}
           />
         </AreaChart>
       </ResponsiveContainer>
