@@ -19,15 +19,28 @@ interface HeartRateChartProps {
 }
 
 const CustomDot = (props: any) => {
-  const { cx, cy, payload } = props;
+  const { cx, cy, payload, zones } = props;
   
   if (payload.isAiRequest) {
+    const hr = payload.hr;
+    let color = '#475569'; // Default Slate (Resting / Low Intensity)
+
+    // Determine color based on zone
+    if (zones && zones.length > 0) {
+        const matched = zones.find((z: ZoneConfig) => hr >= z.min && hr < z.max);
+        if (matched) {
+            color = matched.color;
+        } else if (hr >= zones[zones.length - 1].min) {
+            color = zones[zones.length - 1].color; // Max zone
+        }
+    }
+
     return (
       <g transform={`translate(${cx},${cy})`}>
-        {/* Background glow to ensure visibility on all zones */}
-        <circle r="6" fill="#000" fillOpacity="0.8" />
-        {/* Cyan X Marker */}
-        <path d="M-3 -3 L3 3 M3 -3 L-3 3" stroke="#22d3ee" strokeWidth="2" strokeLinecap="round" />
+        {/* Background circle for contrast against the chart fill */}
+        <circle r="8" fill="#000" stroke={color} strokeWidth="1" strokeOpacity="0.3" />
+        {/* Larger X Marker colored by Zone */}
+        <path d="M-5 -5 L5 5 M5 -5 L-5 5" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
       </g>
     );
   }
@@ -69,12 +82,12 @@ const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#f
            <div className="h-3 w-px bg-white/10" />
            <div className="flex items-center gap-1.5">
              <div className="relative w-2 h-2">
-               <div className="absolute inset-0 bg-black rounded-full" />
-               <svg viewBox="0 0 6 6" className="absolute inset-0 w-full h-full text-cyan-400">
+               {/* Legend Icon for the X marker */}
+               <svg viewBox="0 0 6 6" className="absolute inset-0 w-full h-full text-slate-400">
                   <path d="M1 1L5 5M5 1L1 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                </svg>
              </div>
-             <span className="text-[9px] text-cyan-400 font-mono uppercase">AI Sync Event</span>
+             <span className="text-[9px] text-slate-400 font-mono uppercase">AI Sync (Zone Coded)</span>
            </div>
            <div className="h-3 w-px bg-white/10" />
            <span className="text-[9px] text-slate-600 font-mono uppercase">Floor: 60 BPM</span>
@@ -131,7 +144,7 @@ const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#f
             fillOpacity={1} 
             fill="url(#colorHr)" 
             isAnimationActive={false}
-            dot={<CustomDot />}
+            dot={<CustomDot zones={zones} />}
           />
         </AreaChart>
       </ResponsiveContainer>
