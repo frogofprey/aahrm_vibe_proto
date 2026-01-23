@@ -1,0 +1,5 @@
+{
+  "name": "AetherAegis Dashboard 0.8",
+  "description": "A high-fidelity, real-time heart rate monitoring dashboard with a dark AetherAegis aesthetic, featuring live WebSocket data streaming and scrolling biometric visualization.",
+  "requestFramePermissions": []
+}
