@@ -39,6 +39,15 @@ async function decodeAudioData(
   return buffer;
 }
 
+// --- Time Formatting Utility ---
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
 /**
  * SECURE CONFIGURATION BLOCK
  */
@@ -83,6 +92,11 @@ const App: React.FC = () => {
   const [trainingGoal, setTrainingGoal] = useState(() => localStorage.getItem(STORAGE_KEYS.GOAL) || ENV_DEFAULT_GOAL);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
 
+  // --- Session & Timer State ---
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+  const [elapsedTime, setElapsedTime] = useState("00:00:00");
+
   const [dataPoints, setDataPoints] = useState<HeartRateData[]>([]);
   const [currentHR, setCurrentHR] = useState<number | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
@@ -92,13 +106,19 @@ const App: React.FC = () => {
   const [showRawTelemetry, setShowRawTelemetry] = useState(false);
   
   const [summaries, setSummaries] = useState<MinuteSummary[]>([]);
+  
+  // Refs
   const currentMinuteRef = useRef<number[]>([]);
-  const lastSummaryTimeRef = useRef<number>(Date.now());
+  const nextSummaryTimeRef = useRef<number>(0);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
+  const sessionActiveRef = useRef(isSessionActive); // Mirror for WS callback
   
   // Audio Context Ref
   const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Sync ref
+  useEffect(() => { sessionActiveRef.current = isSessionActive; }, [isSessionActive]);
 
   const zones: ZoneConfig[] = useMemo(() => {
     const maxHR = 220 - age;
@@ -136,6 +156,40 @@ const App: React.FC = () => {
       return [newLog, ...prev].slice(0, MAX_LOG_ENTRIES);
     });
   }, []);
+
+  // Timer Effect
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isSessionActive && sessionStartTime) {
+      interval = setInterval(() => {
+        setElapsedTime(formatDuration(Date.now() - sessionStartTime));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isSessionActive, sessionStartTime]);
+
+  const toggleSession = useCallback(() => {
+    if (isSessionActive) {
+      // Stop Session
+      setIsSessionActive(false);
+      // We keep the elapsed time display visible, but stop updating it
+      addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
+      setSessionStartTime(null);
+    } else {
+      // Start Session
+      if (status !== ConnectionStatus.CONNECTED) {
+        addLog("ERROR: Cannot start session. Device offline.");
+        return;
+      }
+      const now = Date.now();
+      setIsSessionActive(true);
+      setSessionStartTime(now);
+      setElapsedTime("00:00:00");
+      currentMinuteRef.current = []; // Clear buffer
+      nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
+      addLog("SESSION: Workout started. Timer active.");
+    }
+  }, [isSessionActive, status, addLog, elapsedTime]);
 
   const speakInsight = async (text: string) => {
     if (!isVoiceEnabled) return;
@@ -219,8 +273,8 @@ const App: React.FC = () => {
 
   const calculateMinuteSummary = useCallback(() => {
     const values = [...currentMinuteRef.current];
-    currentMinuteRef.current = [];
-    lastSummaryTimeRef.current = Date.now();
+    currentMinuteRef.current = []; // Reset for next minute
+    
     if (values.length === 0) return;
     
     const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -262,31 +316,38 @@ const App: React.FC = () => {
         addLog(`SYSTEM: Handshake confirmed: ${fullDeviceId}`);
         setStatus(ConnectionStatus.CONNECTED);
         ws.send(fullDeviceId);
-        currentMinuteRef.current = []; 
-        lastSummaryTimeRef.current = Date.now();
       };
 
       ws.onmessage = (event) => {
         try {
-          const rawData = JSON.parse(event.data.toString());
-          // Robust checking for various JSON structures (hr directly, or nested in data)
+          const rawMsg = event.data.toString();
+          const rawData = JSON.parse(rawMsg);
           const rawHR = rawData.hr !== undefined ? rawData.hr : (rawData.data?.hr);
-          // Explicit cast to number to handle string "80" vs number 80
           const numericHR = typeof rawHR === 'number' ? rawHR : Number(rawHR);
           
           if (!isNaN(numericHR) && numericHR >= HR_MIN_VALID && numericHR <= HR_MAX_VALID) {
             
-            // Check trigger before creating data
-            const shouldTriggerAi = Date.now() - lastSummaryTimeRef.current >= 60000;
+            // LOGIC: AI triggers only if session is active AND we hit the time delta
+            let isAiTrigger = false;
             
+            if (sessionActiveRef.current) {
+                const now = Date.now();
+                if (now >= nextSummaryTimeRef.current) {
+                    isAiTrigger = true;
+                    // Increment target time by exactly 60000ms from the previous target
+                    // This prevents drift caused by code execution time
+                    nextSummaryTimeRef.current += 60000;
+                }
+            }
+
             const newData: HeartRateData = {
               hr: numericHR,
               timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              isAiRequest: shouldTriggerAi
+              isAiRequest: isAiTrigger
             };
             
             if (showRawTelemetryRef.current) {
-              addLog(`TELEMETRY: ${numericHR} BPM ${shouldTriggerAi ? '[AI_SYNC]' : ''}`);
+              addLog(`TELEMETRY: ${numericHR} BPM ${isAiTrigger ? '[AI_SYNC]' : ''} | RAW: ${rawMsg}`);
             }
             
             setCurrentHR(numericHR);
@@ -295,10 +356,14 @@ const App: React.FC = () => {
               return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
             });
             
-            currentMinuteRef.current.push(numericHR);
-            if (shouldTriggerAi) {
-              calcRef.current(); 
+            // Only accumulate data if session is active
+            if (sessionActiveRef.current) {
+                currentMinuteRef.current.push(numericHR);
+                if (isAiTrigger) {
+                  calcRef.current(); 
+                }
             }
+
           } else if (numericHR !== undefined && numericHR !== null) {
             addLog(`WARNING: Biometric Noise Filtered [${numericHR} BPM]`);
           }
@@ -310,6 +375,8 @@ const App: React.FC = () => {
       ws.onclose = () => {
         addLog(`SYSTEM: Connection severed.`);
         setStatus(ConnectionStatus.DISCONNECTED);
+        // If connection dies, we might want to pause session or just leave it. 
+        // For now, we leave the session active in UI but it won't get data.
       };
       
       ws.onerror = () => {
@@ -342,6 +409,8 @@ const App: React.FC = () => {
     setCurrentHR(null);
     currentMinuteRef.current = [];
     setSummaries([]);
+    setIsSessionActive(false);
+    setElapsedTime("00:00:00");
     setTimeout(connect, 300);
   }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled]);
 
@@ -362,12 +431,36 @@ const App: React.FC = () => {
             </div>
 
             <div className="h-10 w-px bg-white/5 hidden md:block" />
-
+            
             <div className="flex flex-col">
               <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Training Objective</label>
               <select value={trainingGoal} onChange={(e) => setTrainingGoal(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer">
                 {TRAINING_GOALS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
+            </div>
+
+            <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Control</label>
+              <button 
+                onClick={toggleSession}
+                className={`px-4 py-1.5 border font-black rounded-sm transition-all uppercase text-[10px] tracking-widest ${isSessionActive ? 'bg-red-500/20 text-red-500 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)] hover:bg-emerald-500/30'}`}
+              >
+                {isSessionActive ? 'STOP SESSION' : 'START SESSION'}
+              </button>
+            </div>
+
+            <div className="h-10 w-px bg-white/5 hidden md:block" />
+            
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">WS Endpoint</label>
+              <input type="text" value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} placeholder="ws://192.168.1.X:8765" className="bg-black border border-white/10 text-blue-400 font-mono text-xs px-3 py-1.5 w-56 focus:outline-none focus:border-blue-400/50 transition-colors" />
+            </div>
+            
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Device Hex</label>
+              <input type="text" value={deviceIdHex} onChange={(e) => setDeviceIdHex(e.target.value)} className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-3 py-1.5 w-44 focus:outline-none focus:border-emerald-400/50 transition-colors rounded-r-sm" placeholder="XX:XX:XX:XX:XX:XX" />
             </div>
             
             <div className="h-10 w-px bg-white/5 hidden md:block" />
@@ -381,9 +474,7 @@ const App: React.FC = () => {
                 {isVoiceEnabled ? 'Audio: Active' : 'Audio: Muted'}
               </button>
             </div>
-
-            <div className="h-10 w-px bg-white/5 hidden md:block" />
-
+            
             <div className="flex flex-col">
               <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Log Stream</label>
               <button 
@@ -393,24 +484,12 @@ const App: React.FC = () => {
                 {showRawTelemetry ? 'Stream: ON' : 'Stream: OFF'}
               </button>
             </div>
-            
-            <div className="h-10 w-px bg-white/5 hidden md:block" />
-            
-            <div className="flex flex-col">
-              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">WS Endpoint</label>
-              <input type="text" value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} className="bg-black border border-white/10 text-blue-400 font-mono text-xs px-3 py-1.5 w-40 focus:outline-none focus:border-blue-400/50 transition-colors" />
-            </div>
-            
-            <div className="flex flex-col">
-              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Device Hex</label>
-              <input type="text" value={deviceIdHex} onChange={(e) => setDeviceIdHex(e.target.value)} className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-3 py-1.5 w-44 focus:outline-none focus:border-emerald-400/50 transition-colors rounded-r-sm" placeholder="XX:XX:XX:XX:XX:XX" />
-            </div>
-            
+
             <div className="h-10 w-px bg-white/5 hidden md:block" />
 
             <div className="flex flex-col">
               <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Status</label>
-              <StatusBadge status={status} />
+              <StatusBadge status={status} sessionActive={isSessionActive} />
             </div>
             
             <div className="flex gap-2 ml-auto lg:ml-0">
@@ -422,7 +501,7 @@ const App: React.FC = () => {
 
         <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 items-start">
           <div className="xl:col-span-1 space-y-8">
-            <HeartRateDisplay hr={currentHR} zone={currentZone} />
+            <HeartRateDisplay hr={currentHR} zone={currentZone} elapsedTime={elapsedTime} />
             <div className="p-4 aether-border bg-slate-900/20 opacity-60 text-[10px] font-mono">
                <h3 className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-3 border-b border-white/5 pb-2">Target Zones (Age {age})</h3>
                <div className="space-y-2">
@@ -443,7 +522,7 @@ const App: React.FC = () => {
         </div>
       </div>
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-500 ease-in-out transform ${showDebug ? 'translate-y-0' : 'translate-y-full'}`}><DebugLog logs={logs} onClose={() => setShowDebug(false)} /></div>
-      <footer className="mt-auto py-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-bold">AetherAegis Biometric Monitoring Suite // v5.8.0-VisualSync.8765</footer>
+      <footer className="mt-auto py-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-bold">AetherAegis Biometric Monitoring Suite // v5.10.0-ReConnect.8765</footer>
     </div>
   );
 };

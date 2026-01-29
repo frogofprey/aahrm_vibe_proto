@@ -5,9 +5,10 @@ import { ZoneConfig } from '../types';
 interface HeartRateDisplayProps {
   hr: number | null;
   zone: ZoneConfig | null;
+  elapsedTime: string;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone }) => {
+const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime }) => {
   const displayValue = hr !== null ? hr : '--';
   
   // Neutral fallbacks for when no zone is matched or no data is present
@@ -53,6 +54,14 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone }) => {
           {displayValue}
         </span>
         <span className={`text-2xl font-bold uppercase transition-colors duration-500 ${zone ? zone.textClass : 'text-slate-700'}`}>BPM</span>
+      </div>
+
+      {/* Session Timer */}
+      <div className="mt-6 z-10 flex flex-col items-center">
+        <span className="text-[9px] text-slate-500 uppercase tracking-[0.2em] mb-1">Session Timer</span>
+        <div className={`text-xl font-mono font-bold tracking-widest ${elapsedTime !== "00:00:00" ? 'text-white' : 'text-slate-600'}`}>
+            {elapsedTime}
+        </div>
       </div>
 
       <div className="mt-8 flex gap-2 w-full max-w-[200px] z-10">
