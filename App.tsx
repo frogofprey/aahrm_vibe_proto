@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary } from './types';
@@ -114,6 +113,9 @@ const App: React.FC = () => {
   const logIdRef = useRef(0);
   const sessionActiveRef = useRef(isSessionActive); // Mirror for WS callback
   
+  // Session Logging Ref (Stores full history for file export)
+  const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
+  
   // Audio Context Ref
   const audioContextRef = useRef<AudioContext | null>(null);
 
@@ -168,6 +170,49 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [isSessionActive, sessionStartTime]);
 
+  const downloadSessionLog = useCallback(() => {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const min = String(now.getMinutes()).padStart(2, '0');
+    const filename = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
+  
+    let content = `AETHER AEGIS // SESSION LOG\n`;
+    content += `Generated: ${now.toLocaleString()}\n`;
+    content += `Subject Age: ${age}\n`;
+    content += `Training Goal: ${trainingGoal}\n`;
+    content += `Device ID: ${deviceIdHex}\n`;
+    content += `--------------------------------------------------\n\n`;
+  
+    if (allSessionSummariesRef.current.length === 0) {
+      content += `[NO DATA PACKETS RECORDED]\n`;
+    } else {
+      allSessionSummariesRef.current.forEach((s, index) => {
+        content += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
+        content += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        content += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
+        content += `   > RAW VALUES : [${s.values.join(',')}]\n`;
+        content += `\n`;
+      });
+    }
+    
+    // Create blob and download
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    addLog(`SYSTEM: Log file generated: ${filename}`);
+    addLog(`NOTE: File saved to browser default downloads folder.`);
+  }, [age, trainingGoal, deviceIdHex, addLog]);
+
   const toggleSession = useCallback(() => {
     if (isSessionActive) {
       // Stop Session
@@ -175,6 +220,10 @@ const App: React.FC = () => {
       // We keep the elapsed time display visible, but stop updating it
       addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
       setSessionStartTime(null);
+      
+      // Auto-download logs
+      downloadSessionLog();
+
     } else {
       // Start Session
       if (status !== ConnectionStatus.CONNECTED) {
@@ -186,10 +235,11 @@ const App: React.FC = () => {
       setSessionStartTime(now);
       setElapsedTime("00:00:00");
       currentMinuteRef.current = []; // Clear buffer
+      allSessionSummariesRef.current = []; // Clear session history
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
       addLog("SESSION: Workout started. Timer active.");
     }
-  }, [isSessionActive, status, addLog, elapsedTime]);
+  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog]);
 
   const speakInsight = async (text: string) => {
     if (!isVoiceEnabled) return;
@@ -255,6 +305,13 @@ const App: React.FC = () => {
       addLog(`AI_RESPONSE: Analysis complete.`);
       addLog(`AI_INSIGHT: "${insight}"`);
 
+      // Update the log history ref with the new insight
+      const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
+      if (logIndex !== -1) {
+        allSessionSummariesRef.current[logIndex].insight = insight;
+        allSessionSummariesRef.current[logIndex].isAnalyzing = false;
+      }
+
       setSummaries(prev => prev.map(s => 
         s.id === summary.id ? { ...s, insight, isAnalyzing: false } : s
       ));
@@ -265,6 +322,13 @@ const App: React.FC = () => {
       }
     } catch (e) {
       addLog(`AI_ERROR: Failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
+      
+      const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
+      if (logIndex !== -1) {
+        allSessionSummariesRef.current[logIndex].insight = "Analysis failed.";
+        allSessionSummariesRef.current[logIndex].isAnalyzing = false;
+      }
+
       setSummaries(prev => prev.map(s => 
         s.id === summary.id ? { ...s, insight: "Analysis failed.", isAnalyzing: false } : s
       ));
@@ -288,6 +352,9 @@ const App: React.FC = () => {
       values,
       isAnalyzing: true
     };
+
+    // Store in full session log history
+    allSessionSummariesRef.current.push(newSummary);
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
@@ -408,6 +475,7 @@ const App: React.FC = () => {
     setDataPoints([]);
     setCurrentHR(null);
     currentMinuteRef.current = [];
+    allSessionSummariesRef.current = [];
     setSummaries([]);
     setIsSessionActive(false);
     setElapsedTime("00:00:00");

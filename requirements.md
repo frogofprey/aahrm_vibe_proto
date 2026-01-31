@@ -26,6 +26,11 @@
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**: Display the elapsed time of the current active session in `HH:MM:SS` format.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
+*   **Session Export**: Automatically generate and download a local text file (`session_YYYYMMDDHHMM.txt`) when a session is stopped.
+    *   The file must contain session configuration (Age, Goal, Device ID).
+    *   The file must include a chronological record of all "Minute Packets" (Avg/Max/Min HR).
+    *   The file must include the specific AI Analyst insight generated for each packet.
+    *   The file must include the raw telemetry value arrays for post-analysis.
 
 ### 1.4 AI Coaching & Aggregation
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries containing:
