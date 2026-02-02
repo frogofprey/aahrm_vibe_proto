@@ -49,7 +49,14 @@ const DebugLog: React.FC<DebugLogProps> = ({ logs, onClose }) => {
           logs.map((log) => (
             <div key={log.id} className="group flex gap-3 border-l-2 border-transparent hover:border-[#ff003c]/40 hover:bg-white/[0.02] pl-2 transition-colors">
               <span className="text-slate-600 flex-shrink-0 select-none">[{log.timestamp}]</span>
-              <span className={`break-all whitespace-pre-wrap ${log.message.startsWith('SYSTEM') ? 'text-blue-400 font-bold' : log.message.startsWith('ERROR') || log.message.startsWith('FATAL') ? 'text-red-500' : log.message.includes('[DEBUG_PROMPT_START]') || log.message.includes('[DEBUG_INTRO_PROMPT]') ? 'text-amber-500 font-bold' : 'text-slate-300'}`}>
+              <span className={`break-all whitespace-pre-wrap ${
+                log.message.startsWith('SYSTEM') ? 'text-blue-400 font-bold' : 
+                log.message.startsWith('ERROR') || log.message.startsWith('FATAL') ? 'text-red-500' : 
+                log.message.includes('[DEBUG_PROMPT_START]') || log.message.includes('[DEBUG_INTRO_PROMPT]') || log.message.includes('[DEBUG_FINAL_REPORT_PROMPT]') ? 'text-amber-500 font-bold' : 
+                log.message.includes('[MID_TERM_MEMORY]') ? 'text-purple-400 font-bold' : 
+                log.message.includes('[FINAL_REPORT]') ? 'text-emerald-400 font-bold' : 
+                'text-slate-300'
+              }`}>
                 {log.message}
               </span>
             </div>
@@ -70,6 +77,10 @@ const DebugLog: React.FC<DebugLogProps> = ({ logs, onClose }) => {
           <div className="flex items-center gap-1.5">
             <div className="w-1 h-1 bg-amber-500 rounded-full"></div>
             <span className="text-[8px] text-slate-500 uppercase tracking-tighter">Prompt Trace</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-1 h-1 bg-purple-400 rounded-full"></div>
+            <span className="text-[8px] text-slate-500 uppercase tracking-tighter">Memory</span>
           </div>
         </div>
         <span className="text-[8px] text-slate-600 font-bold uppercase tracking-[0.2em]">AES-256 Link Active</span>

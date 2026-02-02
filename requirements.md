@@ -1,3 +1,4 @@
+
 # AetherAegis Biometric Dashboard - Application Requirements
 
 ## 1. Functional Requirements
@@ -26,11 +27,13 @@
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**: Display the elapsed time of the current active session in `HH:MM:SS` format.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
+*   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, and mid-term trends.
 *   **Session Export**: Automatically generate and download a local text file (`session_YYYYMMDDHHMM.txt`) when a session is stopped.
-    *   The file must contain session configuration (Age, Goal, Device ID).
-    *   The file must include a chronological record of all "Minute Packets" (Avg/Max/Min HR).
+    *   The file must contain session configuration, **Voice Profile**, and the **Final Session Report** in the header.
+    *   The file must include a chronological record of all "Minute Packets" (Avg/Max/Min HR), including the **Mid-Term Memory context** used for that minute.
     *   The file must include the specific AI Analyst insight generated for each packet.
     *   The file must include the raw telemetry value arrays for post-analysis.
+    *   The file must append full diagnostics (Prompt & Response) for the Final Report at the end of the log.
 
 ### 1.4 AI Coaching & Aggregation
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries containing:
@@ -39,9 +42,12 @@
     *   Min BPM
     *   Sample Count
     *   Raw value array
-*   **AI Analysis**: Send the Minute Packet to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
+*   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far. This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
+*   **AI Analysis**: Send the Minute Packet (plus History and Mid-Term Context) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
 *   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen), tailoring advice to the user's specific "Training Objective".
-*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext. The system must attempt one retry on synthesis failure before logging an error.
+*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext.
+    *   **Retry Logic**: The system must attempt one retry on synthesis failure.
+    *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately to prevent API throttling.
 
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:
@@ -54,6 +60,8 @@
 
 ### 1.6 System Logging
 *   **Debug Console**: Provide a toggleable panel displaying system events, raw telemetry logs, and API interactions.
+    *   **Mid-Term Memory** updates should be visually distinct (e.g., Purple).
+    *   **Final Report** events should be visually distinct (e.g., Emerald/Amber).
 *   **Telemetry Stream**: Provide a toggle to show/hide raw high-frequency data logging to reduce visual noise.
 
 ## 2. Non-Functional Requirements

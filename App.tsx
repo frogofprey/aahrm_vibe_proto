@@ -130,6 +130,8 @@ const App: React.FC = () => {
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
   const sessionIntroRef = useRef<{ prompt: string; text: string } | null>(null);
+  const currentSessionContextRef = useRef<string>(""); // Mid-term memory storage
+  const finalSessionReportRef = useRef<{ prompt: string; text: string } | null>(null); // Final report storage
   
   // Audio Context Ref
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -201,6 +203,12 @@ const App: React.FC = () => {
     content += `Device ID: ${deviceIdHex}\n`;
     content += `Personality: ${selectedPersona}\n`;
     content += `Voice Profile: ${selectedVoice}\n`;
+    
+    // Insert Final Report in Header (User request: response in head of session report)
+    if (finalSessionReportRef.current) {
+        content += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
+    }
+
     content += `--------------------------------------------------\n\n`;
 
     if (sessionIntroRef.current) {
@@ -216,11 +224,22 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         content += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         content += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        if (s.sessionContextSummary) {
+            content += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary}\n`;
+        }
         content += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         content += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
         content += `   > RAW VALUES : [${s.values.join(',')}]\n`;
         content += `\n`;
       });
+    }
+
+    // Append Final Report Debug Details (User request: prompt and response in session report)
+    if (finalSessionReportRef.current) {
+        content += `--------------------------------------------------\n`;
+        content += `[FINAL REPORT DIAGNOSTICS]\n`;
+        content += `Prompt Used:\n${finalSessionReportRef.current.prompt}\n\n`;
+        content += `Raw Response:\n${finalSessionReportRef.current.text}\n`;
     }
     
     // Create blob and download
@@ -291,8 +310,15 @@ const App: React.FC = () => {
         return; // Success, exit the loop
 
       } catch (e) {
-        addLog(`VOICE_WARN: Attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        addLog(`VOICE_WARN: Attempt ${attempt + 1} failed: ${errorMsg}`);
         
+        // Don't retry on 429
+        if (errorMsg.includes('429') || errorMsg.includes('ResourceExhausted')) {
+             addLog(`VOICE_ERROR: Quota exceeded (429). Aborting retry strategy.`);
+             break;
+        }
+
         if (attempt < maxRetries) {
           addLog(`VOICE: Retrying in 500ms...`);
           await new Promise(resolve => setTimeout(resolve, 500)); // Backoff
@@ -339,6 +365,83 @@ const App: React.FC = () => {
     }
   }, [selectedPersona, trainingGoal, isVoiceEnabled, addLog, speakInsight]);
 
+  const generateSessionSummary = useCallback(async () => {
+    // Collect all past data
+    const summaries = allSessionSummariesRef.current;
+    if (summaries.length < 2) return;
+
+    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const historyText = summaries.map((s, i) => 
+        `Min ${i+1}: Avg ${s.avg}, Max ${s.max}, Min ${s.min}`
+    ).join('\n');
+
+    const prompt = `
+    Persona: ${personaIdentity}
+    User Goal: ${trainingGoal}
+    Task: Review the session history below. Create a concise "Mid-Term Memory" summary of the overall performance trend so far.
+    Output: A single cohesive sentence describing the trajectory (e.g., "Intensity is steadily rising," "Heart rate is stabilizing in Zone 2," etc.).
+    
+    Session History:
+    ${historyText}
+    `;
+
+    try {
+        addLog(`AI_REQUEST: Updating Mid-Term Memory Context...`);
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+        });
+        
+        const summaryText = response.text || "Trends processing...";
+        currentSessionContextRef.current = summaryText;
+        addLog(`[MID_TERM_MEMORY] ${summaryText}`);
+    } catch (e) {
+        addLog(`AI_WARN: Failed to update session context.`);
+    }
+
+  }, [selectedPersona, trainingGoal, addLog]);
+
+  const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
+    const summaries = allSessionSummariesRef.current;
+    if (summaries.length === 0) return;
+
+    const lastSummary = summaries[summaries.length - 1];
+    const midTermContext = currentSessionContextRef.current;
+    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    
+    // Calculate simple stats for prompt
+    const avgHr = Math.round(summaries.reduce((a,b)=>a+b.avg,0)/summaries.length);
+
+    const prompt = `
+    Persona: ${personaIdentity}
+    User Goal: ${trainingGoal}
+    Task: The workout session has ended. Generate a final session report based on the context below.
+    Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
+    
+    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM.
+    Mid-Term Trend: ${midTermContext || "N/A"}
+    Last Minute Insight: ${lastSummary.insight || "N/A"}
+    `;
+
+    try {
+        addLog(`AI_REQUEST: Generating Final Session Report...`);
+        addLog(`[DEBUG_FINAL_REPORT_PROMPT] ${prompt}`); 
+        
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: prompt,
+        });
+        
+        const reportText = response.text || "Session concluded. Data saved.";
+        finalSessionReportRef.current = { prompt, text: reportText };
+        addLog(`[FINAL_REPORT] ${reportText}`);
+    } catch (e) {
+        addLog(`AI_ERROR: Final report generation failed.`);
+    }
+  }, [selectedPersona, trainingGoal, addLog]);
+
   const requestAiInsight = async (summary: MinuteSummary) => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     const tailoredSystemInstruction = `Persona: ${personaIdentity}\n${BASE_SYSTEM_INSTRUCTION.replace('{{GOAL}}', trainingGoal)}`;
@@ -371,7 +474,13 @@ const App: React.FC = () => {
     }
     // --- HISTORY BUILDER END ---
 
-    const prompt = `${tailoredSystemInstruction}\n\n${historyContext ? `CONTEXTUAL MEMORY (Maintain continuity, avoid repetition):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
+    // --- MID-TERM MEMORY INJECTION ---
+    let memoryContext = "";
+    if (currentSessionContextRef.current) {
+        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n\n`;
+    }
+
+    const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${trainingGoal}" as "${selectedPersona}"...`);
@@ -392,11 +501,12 @@ const App: React.FC = () => {
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
+        allSessionSummariesRef.current[logIndex].sessionContextSummary = currentSessionContextRef.current; // Store memory context
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
       }
 
       setSummaries(prev => prev.map(s => 
-        s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt } : s
+        s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt, sessionContextSummary: currentSessionContextRef.current } : s
       ));
 
       // Trigger TTS if enabled
@@ -442,8 +552,16 @@ const App: React.FC = () => {
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
+    
+    // Trigger standard analysis
     requestAiInsight(newSummary);
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight]); // Added speakInsight to deps
+
+    // Check if we should update mid-term memory (After 2nd packet)
+    if (allSessionSummariesRef.current.length >= 2) {
+        generateSessionSummary();
+    }
+
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary]);
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -563,6 +681,8 @@ const App: React.FC = () => {
     currentMinuteRef.current = [];
     allSessionSummariesRef.current = [];
     sessionIntroRef.current = null; // Clear intro ref on restart
+    currentSessionContextRef.current = ""; // Clear memory ref
+    finalSessionReportRef.current = null; // Clear final report
     setSummaries([]);
     setIsSessionActive(false);
     setElapsedTime("00:00:00");
@@ -574,13 +694,16 @@ const App: React.FC = () => {
     return () => { if (wsRef.current) wsRef.current.close(); };
   }, [connect]);
 
-  const toggleSession = useCallback(() => {
+  const toggleSession = useCallback(async () => {
     if (isSessionActive) {
       // Stop Session
       setIsSessionActive(false);
       // We keep the elapsed time display visible, but stop updating it
       addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
       setSessionStartTime(null);
+      
+      // Generate Final Report before downloading
+      await generateFinalSessionReport(elapsedTime);
       
       // Auto-download logs
       downloadSessionLog();
@@ -613,13 +736,15 @@ const App: React.FC = () => {
       currentMinuteRef.current = []; // Clear buffer
       allSessionSummariesRef.current = []; // Clear session history
       sessionIntroRef.current = null; // Clear old intro
+      currentSessionContextRef.current = ""; // Clear old memory
+      finalSessionReportRef.current = null; // Clear old final report
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
       addLog("SESSION: Workout started. Timer active.");
 
       // Trigger Intro Message
       generateIntroMessage();
     }
-  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage]);
+  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport]);
 
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center">

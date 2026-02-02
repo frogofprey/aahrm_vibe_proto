@@ -16,6 +16,7 @@ export interface MinuteSummary {
   insight?: string;
   isAnalyzing?: boolean;
   prompt?: string;
+  sessionContextSummary?: string;
 }
 
 export enum ConnectionStatus {
