@@ -15,6 +15,7 @@ export interface MinuteSummary {
   values: number[];
   insight?: string;
   isAnalyzing?: boolean;
+  prompt?: string;
 }
 
 export enum ConnectionStatus {

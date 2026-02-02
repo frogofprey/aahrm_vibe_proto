@@ -1,4 +1,3 @@
-
 import React, { useRef } from 'react';
 
 interface LogEntry {
@@ -50,7 +49,7 @@ const DebugLog: React.FC<DebugLogProps> = ({ logs, onClose }) => {
           logs.map((log) => (
             <div key={log.id} className="group flex gap-3 border-l-2 border-transparent hover:border-[#ff003c]/40 hover:bg-white/[0.02] pl-2 transition-colors">
               <span className="text-slate-600 flex-shrink-0 select-none">[{log.timestamp}]</span>
-              <span className={`break-all whitespace-pre-wrap ${log.message.startsWith('SYSTEM') ? 'text-blue-400 font-bold' : log.message.startsWith('ERROR') || log.message.startsWith('FATAL') ? 'text-red-500' : log.message.includes('[DEBUG_PROMPT_START]') ? 'text-amber-500 font-bold' : 'text-slate-300'}`}>
+              <span className={`break-all whitespace-pre-wrap ${log.message.startsWith('SYSTEM') ? 'text-blue-400 font-bold' : log.message.startsWith('ERROR') || log.message.startsWith('FATAL') ? 'text-red-500' : log.message.includes('[DEBUG_PROMPT_START]') || log.message.includes('[DEBUG_INTRO_PROMPT]') ? 'text-amber-500 font-bold' : 'text-slate-300'}`}>
                 {log.message}
               </span>
             </div>

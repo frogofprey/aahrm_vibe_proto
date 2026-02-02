@@ -40,8 +40,8 @@
     *   Sample Count
     *   Raw value array
 *   **AI Analysis**: Send the Minute Packet to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
-*   **Persona**: The AI must adopt the "Bio-Analyst" persona, tailoring advice to the user's specific "Training Objective".
-*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext.
+*   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen), tailoring advice to the user's specific "Training Objective".
+*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext. The system must attempt one retry on synthesis failure before logging an error.
 
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:

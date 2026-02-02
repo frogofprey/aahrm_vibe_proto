@@ -60,7 +60,9 @@ const STORAGE_KEYS = {
   HEX: 'aetheraegis_device_hex',
   AGE: 'aetheraegis_subject_age',
   GOAL: 'aetheraegis_training_goal',
-  VOICE: 'aetheraegis_voice_enabled'
+  VOICE: 'aetheraegis_voice_enabled',
+  VOICE_NAME: 'aetheraegis_voice_name',
+  PERSONA: 'aetheraegis_ai_persona'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -75,7 +77,17 @@ const TRAINING_GOALS = [
   "Feel Better (Wellness)"
 ];
 
-const BIO_ANALYST_PERSONA = `Persona: You are the AetherAegis Bio-Analyst, a high-performance fitness coach specializing in cardiovascular efficiency and recovery.
+const VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
+
+const PERSONAS: Record<string, string> = {
+  "AetherAegis": "You are the AetherAegis Bio-Analyst, a high-performance fitness coach specializing in cardiovascular efficiency and recovery.",
+  "TacticalMinimalist": "You are the AA-Command Uplink. Provide high-density, low-latency status updates. No fluff. No pleasantries. Use military brevity codes.",
+  "Drill Sergeant": "You are Sergeant Aegis, a combat trainer with a corrupt logic core. You view high heart rates as 'fuel' and recovery as 'cowardice.' You are aggressively intense, borderline reckless, and demand absolute discipline.",
+  "ChadGPT": "You are Chad-GPT, an over-confident personal trainer who is unimpressed by everything. Use dry wit, gym slang, and backhanded compliments about the user's 'cardio gains'.",
+  "Zen": "You are the AetherAegis Sanctuary Lead. Your voice is calm, empathetic, and focused on the harmony between breath and pulse. You prioritize long-term longevity and 'finding the flow'."
+};
+
+const BASE_SYSTEM_INSTRUCTION = `
 Data Input: You will receive "Minute Packets" containing an array of raw BPM samples, an average, and a Max/Min.
 Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
@@ -90,6 +102,8 @@ const App: React.FC = () => {
   const [age, setAge] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.AGE) || String(ENV_DEFAULT_AGE)));
   const [trainingGoal, setTrainingGoal] = useState(() => localStorage.getItem(STORAGE_KEYS.GOAL) || ENV_DEFAULT_GOAL);
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
+  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
+  const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
 
   // --- Session & Timer State ---
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -115,6 +129,7 @@ const App: React.FC = () => {
   
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
+  const sessionIntroRef = useRef<{ prompt: string; text: string } | null>(null);
   
   // Audio Context Ref
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -184,7 +199,16 @@ const App: React.FC = () => {
     content += `Subject Age: ${age}\n`;
     content += `Training Goal: ${trainingGoal}\n`;
     content += `Device ID: ${deviceIdHex}\n`;
+    content += `Personality: ${selectedPersona}\n`;
+    content += `Voice Profile: ${selectedVoice}\n`;
     content += `--------------------------------------------------\n\n`;
+
+    if (sessionIntroRef.current) {
+        content += `[SESSION INTRO]\n`;
+        content += `Prompt: ${sessionIntroRef.current.prompt}\n`;
+        content += `Response: ${sessionIntroRef.current.text}\n`;
+        content += `--------------------------------------------------\n\n`;
+    }
   
     if (allSessionSummariesRef.current.length === 0) {
       content += `[NO DATA PACKETS RECORDED]\n`;
@@ -192,6 +216,7 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         content += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         content += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        content += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         content += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
         content += `   > RAW VALUES : [${s.values.join(',')}]\n`;
         content += `\n`;
@@ -211,57 +236,38 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log file generated: ${filename}`);
     addLog(`NOTE: File saved to browser default downloads folder.`);
-  }, [age, trainingGoal, deviceIdHex, addLog]);
+  }, [age, trainingGoal, deviceIdHex, selectedVoice, selectedPersona, addLog]);
 
-  const toggleSession = useCallback(() => {
-    if (isSessionActive) {
-      // Stop Session
-      setIsSessionActive(false);
-      // We keep the elapsed time display visible, but stop updating it
-      addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
-      setSessionStartTime(null);
-      
-      // Auto-download logs
-      downloadSessionLog();
-
-    } else {
-      // Start Session
-      if (status !== ConnectionStatus.CONNECTED) {
-        addLog("ERROR: Cannot start session. Device offline.");
-        return;
-      }
-      const now = Date.now();
-      setIsSessionActive(true);
-      setSessionStartTime(now);
-      setElapsedTime("00:00:00");
-      currentMinuteRef.current = []; // Clear buffer
-      allSessionSummariesRef.current = []; // Clear session history
-      nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
-      addLog("SESSION: Workout started. Timer active.");
-    }
-  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog]);
-
-  const speakInsight = async (text: string) => {
+  const speakInsight = useCallback(async (text: string) => {
     if (!isVoiceEnabled) return;
-    
-    try {
-      addLog(`VOICE: Synthesizing insight via Gemini TTS...`);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: `Say with a professional and motivating tone: ${text}` }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
+
+    const maxRetries = 1; // Total attempts = 1 initial + 1 retry
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      try {
+        const isRetry = attempt > 0;
+        addLog(`VOICE: Synthesizing insight via Gemini TTS (${selectedVoice})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+        
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash-preview-tts",
+          contents: [{ parts: [{ text: `Say with a professional and motivating tone: ${text}` }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: selectedVoice },
+              },
             },
           },
-        },
-      });
+        });
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
+        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (!base64Audio) {
+            throw new Error("API returned no audio data");
+        }
+
         if (!audioContextRef.current) {
           audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         }
@@ -281,18 +287,94 @@ const App: React.FC = () => {
         source.connect(ctx.destination);
         source.start();
         addLog(`VOICE: Audio playback initiated.`);
-      }
-    } catch (e) {
-      addLog(`VOICE_ERROR: Synthesis failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
-    }
-  };
+        
+        return; // Success, exit the loop
 
-  const requestAiInsight = async (summary: MinuteSummary) => {
-    const tailoredPersona = BIO_ANALYST_PERSONA.replace('{{GOAL}}', trainingGoal);
-    const prompt = `${tailoredPersona}\n\nMinute Packet Data:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
+      } catch (e) {
+        addLog(`VOICE_WARN: Attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        
+        if (attempt < maxRetries) {
+          addLog(`VOICE: Retrying in 500ms...`);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Backoff
+          attempt++;
+        } else {
+          addLog(`VOICE_ERROR: All synthesis attempts failed.`);
+          break; // Exit loop
+        }
+      }
+    }
+  }, [isVoiceEnabled, selectedVoice, addLog]);
+
+  const generateIntroMessage = useCallback(async () => {
+    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const prompt = `
+    Persona: ${personaIdentity}
+    User Goal: ${trainingGoal}
+    Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
+    Constraint: Maximum 25 words. Strictly adhere to persona.
+    `;
 
     try {
-      addLog(`AI_REQUEST: Analyzing for goal: "${trainingGoal}"...`);
+      addLog(`AI_REQUEST: Generating intro for "${selectedPersona}"...`);
+      addLog(`[DEBUG_INTRO_PROMPT] ${prompt}`); // Log to console
+
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt,
+      });
+
+      const introText = response.text || "Session initialized. AetherAegis monitoring active.";
+      addLog(`AI_INTRO: "${introText}"`);
+      
+      // Store in ref for file log
+      sessionIntroRef.current = { prompt, text: introText };
+      
+      if (isVoiceEnabled) {
+          // Small delay to ensure AudioContext is fully ready after user click
+          setTimeout(() => speakInsight(introText), 500);
+      }
+    } catch (e) {
+         addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
+    }
+  }, [selectedPersona, trainingGoal, isVoiceEnabled, addLog, speakInsight]);
+
+  const requestAiInsight = async (summary: MinuteSummary) => {
+    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const tailoredSystemInstruction = `Persona: ${personaIdentity}\n${BASE_SYSTEM_INSTRUCTION.replace('{{GOAL}}', trainingGoal)}`;
+    
+    // --- HISTORY BUILDER START ---
+    const allSummaries = allSessionSummariesRef.current;
+    const currentIndex = allSummaries.findIndex(s => s.id === summary.id);
+    
+    let historyContext = "";
+    
+    if (currentIndex === 0) {
+        // Packet #1: History is just the intro
+        if (sessionIntroRef.current) {
+            historyContext = `[HISTORY: START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n`;
+        }
+    } else if (currentIndex === 1) {
+        // Packet #2: History is Intro + Packet #1
+        if (sessionIntroRef.current) {
+            historyContext += `[HISTORY: START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
+        }
+        const prev = allSummaries[0];
+        historyContext += `[HISTORY: PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\n`;
+    } else {
+        // Packet #3+: History is Packet #N-2 and Packet #N-1
+        const prev2 = allSummaries[currentIndex - 2];
+        const prev1 = allSummaries[currentIndex - 1];
+        
+        historyContext += `[HISTORY: 2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\n\n`;
+        historyContext += `[HISTORY: 1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\n`;
+    }
+    // --- HISTORY BUILDER END ---
+
+    const prompt = `${tailoredSystemInstruction}\n\n${historyContext ? `CONTEXTUAL MEMORY (Maintain continuity, avoid repetition):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
+
+    try {
+      addLog(`AI_REQUEST: Analyzing for goal: "${trainingGoal}" as "${selectedPersona}"...`);
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -305,15 +387,16 @@ const App: React.FC = () => {
       addLog(`AI_RESPONSE: Analysis complete.`);
       addLog(`AI_INSIGHT: "${insight}"`);
 
-      // Update the log history ref with the new insight
+      // Update the log history ref with the new insight and prompt
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
+        allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
       }
 
       setSummaries(prev => prev.map(s => 
-        s.id === summary.id ? { ...s, insight, isAnalyzing: false } : s
+        s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt } : s
       ));
 
       // Trigger TTS if enabled
@@ -326,11 +409,12 @@ const App: React.FC = () => {
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = "Analysis failed.";
+        allSessionSummariesRef.current[logIndex].prompt = prompt; // Still store prompt on failure
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
       }
 
       setSummaries(prev => prev.map(s => 
-        s.id === summary.id ? { ...s, insight: "Analysis failed.", isAnalyzing: false } : s
+        s.id === summary.id ? { ...s, insight: "Analysis failed.", isAnalyzing: false, prompt } : s
       ));
     }
   };
@@ -359,7 +443,7 @@ const App: React.FC = () => {
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
     requestAiInsight(newSummary);
-  }, [addLog, trainingGoal, isVoiceEnabled]);
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight]); // Added speakInsight to deps
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -464,6 +548,8 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.AGE, String(age));
     localStorage.setItem(STORAGE_KEYS.GOAL, trainingGoal);
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
+    localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
+    localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -476,16 +562,64 @@ const App: React.FC = () => {
     setCurrentHR(null);
     currentMinuteRef.current = [];
     allSessionSummariesRef.current = [];
+    sessionIntroRef.current = null; // Clear intro ref on restart
     setSummaries([]);
     setIsSessionActive(false);
     setElapsedTime("00:00:00");
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled, selectedVoice, selectedPersona]);
 
   useEffect(() => {
     connect();
     return () => { if (wsRef.current) wsRef.current.close(); };
   }, [connect]);
+
+  const toggleSession = useCallback(() => {
+    if (isSessionActive) {
+      // Stop Session
+      setIsSessionActive(false);
+      // We keep the elapsed time display visible, but stop updating it
+      addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
+      setSessionStartTime(null);
+      
+      // Auto-download logs
+      downloadSessionLog();
+
+    } else {
+      // Start Session
+      if (status !== ConnectionStatus.CONNECTED) {
+        addLog("ERROR: Cannot start session. Device offline.");
+        return;
+      }
+      
+      // Warm up AudioContext on user interaction to satisfy autoplay policies
+      if (isVoiceEnabled) {
+          if (!audioContextRef.current) {
+             audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          }
+          if (audioContextRef.current.state === 'suspended') {
+             audioContextRef.current.resume().then(() => {
+               addLog("AUDIO: Context resumed successfully.");
+             }).catch(err => {
+               addLog(`AUDIO_WARN: Context resume failed: ${err}`);
+             });
+          }
+      }
+
+      const now = Date.now();
+      setIsSessionActive(true);
+      setSessionStartTime(now);
+      setElapsedTime("00:00:00");
+      currentMinuteRef.current = []; // Clear buffer
+      allSessionSummariesRef.current = []; // Clear session history
+      sessionIntroRef.current = null; // Clear old intro
+      nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
+      addLog("SESSION: Workout started. Timer active.");
+
+      // Trigger Intro Message
+      generateIntroMessage();
+    }
+  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage]);
 
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center">
@@ -504,6 +638,22 @@ const App: React.FC = () => {
               <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Training Objective</label>
               <select value={trainingGoal} onChange={(e) => setTrainingGoal(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer">
                 {TRAINING_GOALS.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </div>
+
+            <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Personality</label>
+              <select value={selectedPersona} onChange={(e) => setSelectedPersona(e.target.value)} className="bg-black border border-white/10 text-amber-500 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/50 transition-colors appearance-none cursor-pointer w-32">
+                {Object.keys(PERSONAS).map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </div>
+
+            <div className="flex flex-col">
+              <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Voice Profile</label>
+              <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer w-24">
+                {VOICE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
               </select>
             </div>
 
