@@ -47,6 +47,12 @@ function formatDuration(ms: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+// --- Text Cleaning Utility ---
+function cleanInsightText(text: string): string {
+  // Removes "Score: [X] | " or "Score: X | " prefix case-insensitively
+  return text.replace(/^Score:\s*\[?[\d.]+\]?\s*\|\s*/i, '').trim();
+}
+
 /**
  * SECURE CONFIGURATION BLOCK
  */
@@ -93,7 +99,12 @@ Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
 Goal Customization: Your feedback MUST be focused on the user's specific objective: {{GOAL}}.
-Goal: Provide a concise (1-sentence) insight after each packet that helps the user optimize their current session for their specific objective.`;
+Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
+1-3: Routine data, no significant change.
+4-6: Notable trend shift or minor zone boundary approach.
+7-10: Critical breach, safety alert, or major mission milestone.
+Output format: Score: [X] | [Analysis Text]
+Goal: Provide a concise (1-sentence) insight after each packet that helps the user optimize their current session for their specific objective, formatted strictly as requested.`;
 
 const App: React.FC = () => {
   // --- Persistent State Initialization ---
@@ -476,7 +487,8 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
       
       if (isVoiceEnabled) {
           // Small delay to ensure AudioContext is fully ready after user click
-          setTimeout(() => speakInsight(introText), 500);
+          const cleanIntro = cleanInsightText(introText);
+          setTimeout(() => speakInsight(cleanIntro), 500);
       }
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
@@ -559,7 +571,8 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
 
         // Trigger TTS for final report if voice is enabled
         if (isVoiceEnabled) {
-            speakInsight(reportText);
+            const cleanReport = cleanInsightText(reportText);
+            speakInsight(cleanReport);
         }
 
     } catch (e) {
@@ -641,9 +654,12 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt, sessionContextSummary: currentSessionContextRef.current } : s
       ));
 
+      // Clean text for TTS
+      const cleanText = cleanInsightText(insight);
+
       // Trigger TTS if enabled
       if (isVoiceEnabled) {
-        speakInsight(insight);
+        speakInsight(cleanText);
       }
     } catch (e) {
       addLog(`AI_ERROR: Failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
@@ -889,6 +905,12 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     }
   }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport, generateMissionProfile]);
 
+  // Compute the latest cleaned insight for display
+  const latestInsightCleaned = useMemo(() => {
+    if (summaries.length === 0 || !summaries[0].insight) return undefined;
+    return cleanInsightText(summaries[0].insight);
+  }, [summaries]);
+
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center relative">
       <div className={`w-full ${!isFullScreen ? 'max-w-7xl space-y-8 pb-32' : 'max-w-full h-[90vh] pb-0'}`}>
@@ -991,15 +1013,21 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         {isFullScreen && (
           <button 
             onClick={() => setIsFullScreen(false)}
-            className="fixed bottom-8 right-8 z-[60] px-4 py-2 border border-white/20 text-slate-400 hover:text-white hover:border-white/50 rounded-sm text-xs font-bold uppercase tracking-widest bg-black/50 backdrop-blur-md transition-all"
+            className="fixed top-6 left-6 z-[60] px-6 py-2.5 border border-white/20 text-slate-300 hover:text-white hover:border-[#ff003c] hover:bg-[#ff003c]/10 rounded-sm text-xs font-bold uppercase tracking-widest bg-black/90 backdrop-blur-xl transition-all shadow-lg flex items-center gap-2"
           >
-            Restore View
+            <span className="text-[#ff003c] text-lg leading-none">&laquo;</span> Restore View
           </button>
         )}
 
         <div className={`grid grid-cols-1 ${!isFullScreen ? 'xl:grid-cols-4 gap-8 items-start' : 'h-[85vh] w-full'}`}>
           <div className={`${!isFullScreen ? 'xl:col-span-1 space-y-8' : 'w-full h-full'} transition-all duration-500`}>
-            <HeartRateDisplay hr={currentHR} zone={currentZone} elapsedTime={elapsedTime} />
+            <HeartRateDisplay 
+              hr={currentHR} 
+              zone={currentZone} 
+              elapsedTime={elapsedTime} 
+              latestInsight={latestInsightCleaned}
+              isFullScreen={isFullScreen}
+            />
             {!isFullScreen && (
               <div className="p-4 aether-border bg-slate-900/20 opacity-60 text-[10px] font-mono">
                  <h3 className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-3 border-b border-white/5 pb-2">Target Zones (Age {age})</h3>

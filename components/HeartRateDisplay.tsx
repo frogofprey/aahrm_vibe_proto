@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { ZoneConfig } from '../types';
 
@@ -6,9 +5,11 @@ interface HeartRateDisplayProps {
   hr: number | null;
   zone: ZoneConfig | null;
   elapsedTime: string;
+  latestInsight?: string;
+  isFullScreen?: boolean;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime }) => {
+const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, latestInsight, isFullScreen }) => {
   const displayValue = hr !== null ? hr : '--';
   
   // Neutral fallbacks for when no zone is matched or no data is present
@@ -63,6 +64,16 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
             {elapsedTime}
         </div>
       </div>
+
+      {/* Full Screen Insight Overlay */}
+      {isFullScreen && latestInsight && (
+        <div className="mt-6 z-10 max-w-2xl text-center px-4 animate-pulse duration-[3000ms]">
+          <div className="text-[10px] text-cyan-500/70 uppercase tracking-widest mb-2 font-bold">Analyst Uplink</div>
+          <p className={`text-lg md:text-xl font-medium italic leading-relaxed ${zone ? zone.textClass : 'text-slate-300'} transition-colors duration-500`}>
+            "{latestInsight}"
+          </p>
+        </div>
+      )}
 
       <div className="mt-8 flex gap-2 w-full max-w-[200px] z-10">
         {[...Array(12)].map((_, i) => (
