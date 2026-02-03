@@ -4,7 +4,7 @@
 ## 1. Functional Requirements
 
 ### 1.1 Connectivity & Telemetry
-*   **WebSocket Client**: The application must connect to a configurable WebSocket endpoint (default: `ws://localhost:8765`).
+*   **WebSocket Client**: The application must connect to a configurable WebSocket endpoint (default: `ws://localhost:8080`).
 *   **Protocol Handling**: The app must send a handshake message upon connection in the format `connect:{DEVICE_ID}`.
 *   **Data Parsing**: The app must parse incoming JSON messages containing heart rate data (key: `hr` or `data.hr`).
 *   **Signal Validation**: Incoming heart rate values must be validated against a physiological range (40 - 220 BPM) to filter noise.
@@ -31,15 +31,15 @@
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age and Goal.
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
-*   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, and mid-term trends.
+*   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, and **peak HR**.
     *   **Audio**: If the voice profile is enabled, this final report must be read aloud via TTS.
-*   **Session Export**: Automatically generate and download a local text file (`session_YYYYMMDDHHMM.txt`) when a session is stopped.
-    *   The file must contain session configuration, **Voice Profile**, and the **Final Session Report** in the header.
-    *   The file must include the **Mission Profile** (Prompt and Response).
-    *   The file must include a chronological record of all "Minute Packets" (Avg/Max/Min HR), including the **Mid-Term Memory context** used for that minute.
-    *   The file must include the specific AI Analyst insight generated for each packet.
-    *   The file must include the raw telemetry value arrays for post-analysis.
-    *   The file must append full diagnostics (Prompt & Response) for the Final Report at the end of the log.
+*   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
+    1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
+        *   Contains full debug details, prompts, raw telemetry, mission profile, mid-term memory, and final report diagnostics.
+    2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
+        *   A concise summary suitable for long-term memory systems.
+        *   Contains only the Header, Session Intro, Periodic Heart Rate Meta Values (Avg/Max), and the Coaching Insight text for each minute.
+        *   Devoid of raw prompts, raw telemetry arrays, and system debug info.
 
 ### 1.4 AI Coaching & Aggregation
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries containing:

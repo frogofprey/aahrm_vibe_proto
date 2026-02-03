@@ -50,7 +50,7 @@ function formatDuration(ms: number): string {
 /**
  * SECURE CONFIGURATION BLOCK
  */
-const ENV_WS_URL = (process.env as any).WS_URL || 'ws://localhost:8765';
+const ENV_WS_URL = (process.env as any).WS_URL || 'ws://localhost:8080';
 const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
 const ENV_DEFAULT_GOAL = (process.env as any).DEFAULT_GOAL || 'Get Fitter (Cardio)';
@@ -200,75 +200,108 @@ const App: React.FC = () => {
     const dd = String(now.getDate()).padStart(2, '0');
     const hh = String(now.getHours()).padStart(2, '0');
     const min = String(now.getMinutes()).padStart(2, '0');
-    const filename = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
-  
-    let content = `AETHER AEGIS // SESSION LOG\n`;
-    content += `Generated: ${now.toLocaleString()}\n`;
-    content += `Subject Age: ${age}\n`;
-    content += `Training Goal: ${trainingGoal}\n`;
-    content += `Device ID: ${deviceIdHex}\n`;
-    content += `Personality: ${selectedPersona}\n`;
-    content += `Voice Profile: ${selectedVoice}\n`;
     
-    // Insert Final Report in Header
+    // --- FILE 1: FULL DEBUG LOG ---
+    const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
+    let contentDebug = `AETHER AEGIS // SESSION LOG\n`;
+    contentDebug += `Generated: ${now.toLocaleString()}\n`;
+    contentDebug += `Subject Age: ${age}\n`;
+    contentDebug += `Training Goal: ${trainingGoal}\n`;
+    contentDebug += `Device ID: ${deviceIdHex}\n`;
+    contentDebug += `Personality: ${selectedPersona}\n`;
+    contentDebug += `Voice Profile: ${selectedVoice}\n`;
+    
     if (finalSessionReportRef.current) {
-        content += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
+        contentDebug += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
     }
 
-    content += `--------------------------------------------------\n\n`;
+    contentDebug += `--------------------------------------------------\n\n`;
 
-    // Insert Mission Profile
     if (missionProfileRef.current) {
-        content += `[MISSION PROFILE]\n`;
-        content += `Prompt: ${missionProfileRef.current.prompt}\n`;
-        content += `Response: ${missionProfileRef.current.text}\n`;
-        content += `--------------------------------------------------\n\n`;
+        contentDebug += `[MISSION PROFILE]\n`;
+        contentDebug += `Prompt: ${missionProfileRef.current.prompt}\n`;
+        contentDebug += `Response: ${missionProfileRef.current.text}\n`;
+        contentDebug += `--------------------------------------------------\n\n`;
     }
 
     if (sessionIntroRef.current) {
-        content += `[SESSION INTRO]\n`;
-        content += `Prompt: ${sessionIntroRef.current.prompt}\n`;
-        content += `Response: ${sessionIntroRef.current.text}\n`;
-        content += `--------------------------------------------------\n\n`;
+        contentDebug += `[SESSION INTRO]\n`;
+        contentDebug += `Prompt: ${sessionIntroRef.current.prompt}\n`;
+        contentDebug += `Response: ${sessionIntroRef.current.text}\n`;
+        contentDebug += `--------------------------------------------------\n\n`;
     }
   
     if (allSessionSummariesRef.current.length === 0) {
-      content += `[NO DATA PACKETS RECORDED]\n`;
+      contentDebug += `[NO DATA PACKETS RECORDED]\n`;
     } else {
       allSessionSummariesRef.current.forEach((s, index) => {
-        content += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
-        content += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
+        contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
         if (s.sessionContextSummary) {
-            content += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary}\n`;
+            contentDebug += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary}\n`;
         }
-        content += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
-        content += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
-        content += `   > RAW VALUES : [${s.values.join(',')}]\n`;
-        content += `\n`;
+        contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
+        contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
+        contentDebug += `   > RAW VALUES : [${s.values.join(',')}]\n`;
+        contentDebug += `\n`;
       });
     }
 
-    // Append Final Report Debug Details
     if (finalSessionReportRef.current) {
-        content += `--------------------------------------------------\n`;
-        content += `[FINAL REPORT DIAGNOSTICS]\n`;
-        content += `Prompt Used:\n${finalSessionReportRef.current.prompt}\n\n`;
-        content += `Raw Response:\n${finalSessionReportRef.current.text}\n`;
+        contentDebug += `--------------------------------------------------\n`;
+        contentDebug += `[FINAL REPORT DIAGNOSTICS]\n`;
+        contentDebug += `Prompt Used:\n${finalSessionReportRef.current.prompt}\n\n`;
+        contentDebug += `Raw Response:\n${finalSessionReportRef.current.text}\n`;
+    }
+
+    // --- FILE 2: USER SESSION SUMMARY (Concise) ---
+    const filenameUser = `usersession_${yyyy}${mm}${dd}${hh}${min}.txt`;
+    let contentUser = `AETHER AEGIS // USER SESSION SUMMARY\n`;
+    contentUser += `Generated: ${now.toLocaleString()}\n`;
+    contentUser += `Subject Age: ${age}\n`;
+    contentUser += `Training Goal: ${trainingGoal}\n`;
+    contentUser += `Personality: ${selectedPersona}\n`;
+    contentUser += `--------------------------------------------------\n\n`;
+
+    if (sessionIntroRef.current) {
+        contentUser += `[SESSION START]\n`;
+        contentUser += `Coach Intro: "${sessionIntroRef.current.text}"\n\n`;
+    }
+
+    if (allSessionSummariesRef.current.length > 0) {
+        contentUser += `[TIMELINE]\n`;
+        allSessionSummariesRef.current.forEach((s, index) => {
+            contentUser += `Minute ${index + 1} (${s.timestamp}): Avg ${s.avg} BPM | Max ${s.max} BPM\n`;
+            contentUser += `Coach: "${s.insight || "N/A"}"\n\n`;
+        });
+    }
+
+    if (finalSessionReportRef.current) {
+        contentUser += `[SESSION END]\n`;
+        contentUser += `Final Report: "${finalSessionReportRef.current.text}"\n`;
     }
     
-    // Create blob and download
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // --- DOWNLOAD TRIGGER HELPERS ---
+    const triggerDownload = (filename: string, text: string) => {
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    // Download both
+    triggerDownload(filenameDebug, contentDebug);
+    setTimeout(() => {
+        triggerDownload(filenameUser, contentUser);
+    }, 200);
     
-    addLog(`SYSTEM: Log file generated: ${filename}`);
-    addLog(`NOTE: File saved to browser default downloads folder.`);
+    addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
+    addLog(`NOTE: Files saved to browser default downloads folder.`);
   }, [age, trainingGoal, deviceIdHex, selectedVoice, selectedPersona, addLog]);
 
   // --- Audio Queue Processor ---
@@ -497,6 +530,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     
     // Calculate simple stats for prompt
     const avgHr = Math.round(summaries.reduce((a,b)=>a+b.avg,0)/summaries.length);
+    const peakHr = Math.max(...summaries.map(s => s.max));
 
     const prompt = `
     Persona: ${personaIdentity}
@@ -504,7 +538,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     Task: The workout session has ended. Generate a final session report based on the context below.
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
     
-    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM.
+    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM.
     Mid-Term Trend: ${midTermContext || "N/A"}
     Last Minute Insight: ${lastSummary.insight || "N/A"}
     `;
@@ -908,7 +942,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
               
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">WS Endpoint</label>
-                <input type="text" value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} placeholder="ws://192.168.1.X:8765" className="bg-black border border-white/10 text-blue-400 font-mono text-xs px-3 py-1.5 w-56 focus:outline-none focus:border-blue-400/50 transition-colors" />
+                <input type="text" value={wsUrl} onChange={(e) => setWsUrl(e.target.value)} placeholder="ws://192.168.1.X:8080" className="bg-black border border-white/10 text-blue-400 font-mono text-xs px-3 py-1.5 w-56 focus:outline-none focus:border-blue-400/50 transition-colors" />
               </div>
               
               <div className="flex flex-col">
@@ -990,7 +1024,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         </div>
       </div>
       <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-500 ease-in-out transform ${showDebug ? 'translate-y-0' : 'translate-y-full'}`}><DebugLog logs={logs} onClose={() => setShowDebug(false)} /></div>
-      <footer className="mt-auto py-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-bold">AetherAegis Biometric Monitoring Suite // v5.10.0-ReConnect.8765</footer>
+      <footer className="mt-auto py-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-bold">AetherAegis Biometric Monitoring Suite // v5.10.0-ReConnect.8080</footer>
     </div>
   );
 };
