@@ -52,9 +52,10 @@ const DebugLog: React.FC<DebugLogProps> = ({ logs, onClose }) => {
               <span className={`break-all whitespace-pre-wrap ${
                 log.message.startsWith('SYSTEM') ? 'text-blue-400 font-bold' : 
                 log.message.startsWith('ERROR') || log.message.startsWith('FATAL') ? 'text-red-500' : 
-                log.message.includes('[DEBUG_PROMPT_START]') || log.message.includes('[DEBUG_INTRO_PROMPT]') || log.message.includes('[DEBUG_FINAL_REPORT_PROMPT]') ? 'text-amber-500 font-bold' : 
+                log.message.includes('[DEBUG_PROMPT_START]') || log.message.includes('[DEBUG_INTRO_PROMPT]') || log.message.includes('[DEBUG_FINAL_REPORT_PROMPT]') || log.message.includes('[DEBUG_MISSION_PROFILE_PROMPT]') ? 'text-amber-500 font-bold' : 
                 log.message.includes('[MID_TERM_MEMORY]') ? 'text-purple-400 font-bold' : 
                 log.message.includes('[FINAL_REPORT]') ? 'text-emerald-400 font-bold' : 
+                log.message.includes('[MISSION_PROFILE]') ? 'text-cyan-400 font-bold' :
                 'text-slate-300'
               }`}>
                 {log.message}
