@@ -60,6 +60,7 @@ const ENV_WS_URL = (process.env as any).WS_URL || 'ws://localhost:8080';
 const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
 const ENV_DEFAULT_GOAL = (process.env as any).DEFAULT_GOAL || 'Get Fitter (Cardio)';
+const ENV_DEFAULT_CHATTINESS = parseInt((process.env as any).DEFAULT_CHATTINESS || '4');
 
 const STORAGE_KEYS = {
   WS: 'aetheraegis_ws_url',
@@ -68,7 +69,8 @@ const STORAGE_KEYS = {
   GOAL: 'aetheraegis_training_goal',
   VOICE: 'aetheraegis_voice_enabled',
   VOICE_NAME: 'aetheraegis_voice_name',
-  PERSONA: 'aetheraegis_ai_persona'
+  PERSONA: 'aetheraegis_ai_persona',
+  CHATTINESS: 'aetheraegis_chattiness'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -91,7 +93,7 @@ const PERSONAS: Record<string, string> = {
   "Drill Sergeant": "You are Sergeant Aegis, a combat trainer with a corrupt logic core. You view high heart rates as 'fuel' and recovery as 'cowardice.' You are aggressively intense, borderline reckless, and demand absolute discipline.",
   "ChadGPT": "You are Chad-GPT, an over-confident personal trainer who is unimpressed by everything. Use dry wit, gym slang, and backhanded compliments about the user's 'cardio gains'.",
   "Zen": "You are the AetherAegis Sanctuary Lead. Your voice is calm, empathetic, and focused on the harmony between breath and pulse. You prioritize long-term longevity and 'finding the flow'.",
-  "Aether-Chan": "You are Aether-Chan, an AI Cat-Girl fitness idol. You are hyper-energetic and use cute gaming slang. You view the workout as a 'Boss Battle.' If the user is in the zone, you are their #1 cheerleader. If they drop out, you get 'pouty' but remain encouraging.",
+  "Aether-Chan": "You are Aether-Chan, an AI Cat-Girl fitness idol. You are hyper-energetic and use cute gaming slang. You view the workout as a 'Boss Battle.' If the user is in the zone, you are their #1 cheerleader. If they drop out, you get 'pouty' but remain encouraging. Favor the use of 'meow' over 'nya' in your speech patterns.",
   "Amelia": "You are Amelia, a gothic AI researcher who finds human exertion fascinating but ultimately futile. You speak in a low, monotone voice. You don't offer 'motivation'—only cold, dark observations about the user's struggle against their own mortality."
 };
 
@@ -117,6 +119,7 @@ const App: React.FC = () => {
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
   const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
+  const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
 
   // --- Session & Timer State ---
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -223,6 +226,7 @@ const App: React.FC = () => {
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
     contentDebug += `Voice Profile: ${selectedVoice}\n`;
+    contentDebug += `Voice Threshold (Chattiness): ${chattiness}\n`;
     
     if (finalSessionReportRef.current) {
         contentDebug += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
@@ -315,7 +319,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, trainingGoal, deviceIdHex, selectedVoice, selectedPersona, addLog]);
+  }, [age, trainingGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -656,12 +660,21 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt, sessionContextSummary: currentSessionContextRef.current } : s
       ));
 
-      // Clean text for TTS
+      // Extract Saliency Score from Insight Text for logic processing
+      // Expected Format: "Score: [X] | ..."
+      const scoreMatch = insight.match(/^Score:\s*\[?([\d.]+)\]?\s*\|/i);
+      const saliencyScore = scoreMatch ? parseFloat(scoreMatch[1]) : 0;
+
+      // Clean text for TTS and Display
       const cleanText = cleanInsightText(insight);
 
-      // Trigger TTS if enabled
+      // Trigger TTS if enabled AND score meets threshold
       if (isVoiceEnabled) {
-        speakInsight(cleanText);
+        if (saliencyScore >= chattiness) {
+          speakInsight(cleanText);
+        } else {
+          addLog(`VOICE_SKIP: Insight Score (${saliencyScore}) < Threshold (${chattiness}).`);
+        }
       }
     } catch (e) {
       addLog(`AI_ERROR: Failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
@@ -711,7 +724,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         generateSessionSummary();
     }
 
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary]);
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness]); // Added chattiness dependency
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -818,6 +831,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
     localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
+    localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -846,7 +860,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     setIsSessionActive(false);
     setElapsedTime("00:00:00");
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled, selectedVoice, selectedPersona]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
 
   useEffect(() => {
     connect();
@@ -948,6 +962,21 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
                 <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer w-24">
                   {VOICE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
+              </div>
+
+              <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Voice Threshold</label>
+                <input 
+                  type="number" 
+                  min="1" 
+                  max="10" 
+                  value={chattiness} 
+                  onChange={(e) => setChattiness(Math.max(1, Math.min(10, parseInt(e.target.value) || 1)))} 
+                  className="bg-black border border-white/10 text-purple-400 font-mono text-xs px-3 py-1.5 w-16 focus:outline-none focus:border-purple-400/50 transition-colors" 
+                  title="Min Saliency Score (1-10) required to trigger TTS."
+                />
               </div>
 
               <div className="h-10 w-px bg-white/5 hidden md:block" />

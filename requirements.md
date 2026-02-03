@@ -55,6 +55,7 @@
 *   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext.
     *   **Retry Logic**: The system must attempt one retry on synthesis failure.
     *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately to prevent API throttling.
+    *   **Chattiness Threshold**: Allow the user to set a threshold (1-10, default 4). Only AI insights with a Saliency Score greater than or equal to this threshold will trigger TTS.
 
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:
@@ -63,6 +64,7 @@
     *   WebSocket URL
     *   Device ID (Hex)
     *   Audio/Voice Toggle
+    *   Voice Threshold (Chattiness)
 *   **Persistence**: All configuration settings must be saved to `localStorage` and restored upon page reload.
 
 ### 1.6 System Logging
