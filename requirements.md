@@ -60,7 +60,13 @@
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:
     *   Subject Age (determines Heart Rate Zones)
-    *   Training Objective (e.g., Cardio, Weight Loss, Lose Weight 2/3, Strength)
+    *   Training Objective:
+        *   Wellness
+        *   Low Intensity Weight Loss
+        *   Mid Intensity Weight Loss
+        *   General Weight Loss
+        *   Strength Training
+        *   High Intensity
     *   WebSocket URL
     *   Device ID (Hex)
     *   Audio/Voice Toggle

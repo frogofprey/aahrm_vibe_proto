@@ -59,7 +59,6 @@ function cleanInsightText(text: string): string {
 const ENV_WS_URL = (process.env as any).WS_URL || 'ws://localhost:8080';
 const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
-const ENV_DEFAULT_GOAL = (process.env as any).DEFAULT_GOAL || 'Get Fitter (Cardio)';
 const ENV_DEFAULT_CHATTINESS = parseInt((process.env as any).DEFAULT_CHATTINESS || '4');
 
 const STORAGE_KEYS = {
@@ -78,12 +77,13 @@ const MAX_LOG_ENTRIES = 100;
 const HR_MIN_VALID = 40;
 const HR_MAX_VALID = 220;
 
-const TRAINING_GOALS = [
-  "Get Fitter (Cardio)",
-  "Lose Weight (Metabolic)",
-  "Lose Weight 2/3",
-  "Get Stronger (Strength)",
-  "Feel Better (Wellness)"
+const TRAINING_OBJECTIVES = [
+  { title: "Wellness", prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target" },
+  { title: "Low Intensity Weight Loss", prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
+  { title: "Mid Intensity Weight Loss", prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
+  { title: "General Weight Loss", prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods" },
+  { title: "Strength Training", prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods" },
+  { title: "High Intensity", prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute" }
 ];
 
 const VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
@@ -116,11 +116,20 @@ const App: React.FC = () => {
   const [wsUrl, setWsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.WS) || ENV_WS_URL);
   const [deviceIdHex, setDeviceIdHex] = useState(() => localStorage.getItem(STORAGE_KEYS.HEX) || ENV_DEVICE_HEX);
   const [age, setAge] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.AGE) || String(ENV_DEFAULT_AGE)));
-  const [trainingGoal, setTrainingGoal] = useState(() => localStorage.getItem(STORAGE_KEYS.GOAL) || ENV_DEFAULT_GOAL);
+  const [trainingGoal, setTrainingGoal] = useState(() => {
+    const stored = localStorage.getItem(STORAGE_KEYS.GOAL);
+    const exists = TRAINING_OBJECTIVES.some(o => o.title === stored);
+    return exists ? stored! : TRAINING_OBJECTIVES[1].title; // Default to "Low Intensity Weight Loss"
+  });
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
   const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
   const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
+
+  // Resolve full objective object
+  const currentObjective = useMemo(() => 
+    TRAINING_OBJECTIVES.find(o => o.title === trainingGoal) || TRAINING_OBJECTIVES[1]
+  , [trainingGoal]);
 
   // --- Session & Timer State ---
   const [isSessionActive, setIsSessionActive] = useState(false);
@@ -223,7 +232,8 @@ const App: React.FC = () => {
     let contentDebug = `AETHER AEGIS // SESSION LOG\n`;
     contentDebug += `Generated: ${now.toLocaleString()}\n`;
     contentDebug += `Subject Age: ${age}\n`;
-    contentDebug += `Training Goal: ${trainingGoal}\n`;
+    contentDebug += `Training Goal: ${currentObjective.title}\n`;
+    contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
     contentDebug += `Voice Profile: ${selectedVoice}\n`;
@@ -277,7 +287,7 @@ const App: React.FC = () => {
     let contentUser = `AETHER AEGIS // USER SESSION SUMMARY\n`;
     contentUser += `Generated: ${now.toLocaleString()}\n`;
     contentUser += `Subject Age: ${age}\n`;
-    contentUser += `Training Goal: ${trainingGoal}\n`;
+    contentUser += `Training Goal: ${currentObjective.title}\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
 
@@ -320,7 +330,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, trainingGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
+  }, [age, currentObjective, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -439,15 +449,18 @@ const App: React.FC = () => {
   }, [isVoiceEnabled, selectedVoice, addLog, processAudioQueue]);
 
   const generateMissionProfile = useCallback(async () => {
-    const prompt = `Generate a single-session mission profile for a ${age}-year-old.
-Current Objective: ${trainingGoal}
+    const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
+Selected Strategy: ${currentObjective.title}
+Contextual Instructions: "${currentObjective.prompt}"
+
 Requirements:
-Calculate the Max HR using the standard 220-age formula.
-Based on the objective, identify the Primary Training Zone (e.g., Zone 2 for Weight Loss) and provide the exact BPM range.
-Provide a Recovery Ceiling (the target BPM during rest periods).
-Provide the specific BPM ranges for Zones 1–5 based on the selected goal.
-State a Hard Safety Redline (100% intensity).
-Output Style: Use a brief, bulleted list. No conversational filler. The resultant text will be used for evaluating live hr data for the purpose of providing feedback to the user.`;
+1.  **Biometric Baselines**: Calculate Max HR (220-age) and specific BPM ranges for Zones 1–5.
+2.  **Primary Directive**: Identify the target zone(s) based on the Contextual Instructions and provide their BPM ranges. Include a +/- 3 BPM tolerance buffer where minor deviations are ignored. Explicitly restate the target time-in-zone percentage (from Contextual Instructions) required to classify the telemetry stream as 'good'.
+3.  **Adherence Protocol**: Based on the Contextual Instructions, define the judging criteria. Instead of a binary pass/fail, provide a descriptive guideline (e.g., "Maintain target zone for 80% of the session", "Allow for transient drops during recovery", "Strict adherence required for intervals").
+4.  **Recovery Parameters**: Define a Recovery Ceiling (BPM) for rest periods.
+5.  **Safety Limits**: State the Hard Safety Redline (100% intensity).
+
+Output Style: concise, structured, and directive. This profile will serve as the "ground truth" for an AI coach analyzing live telemetry.`;
 
     try {
         addLog(`AI_REQUEST: Generating Mission Profile (Baseline)...`);
@@ -465,13 +478,13 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [age, trainingGoal, addLog]);
+  }, [age, currentObjective, addLog]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${trainingGoal}
+    User Goal: ${currentObjective.title} (${currentObjective.prompt})
     Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
     Constraint: Maximum 25 words. Strictly adhere to persona.
     `;
@@ -500,7 +513,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, trainingGoal, isVoiceEnabled, addLog, speakInsight]);
+  }, [selectedPersona, currentObjective, isVoiceEnabled, addLog, speakInsight]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect all past data
@@ -514,9 +527,9 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
 
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${trainingGoal}
-    Task: Review the session history below. Create a concise "Mid-Term Memory" summary of the overall performance trend so far.
-    Output: A single cohesive sentence describing the trajectory (e.g., "Intensity is steadily rising," "Heart rate is stabilizing in Zone 2," etc.).
+    User Goal: ${currentObjective.title} (${currentObjective.prompt})
+    Task: Review the session history below. Create a "Mid-Term Memory" summary of the overall performance trend so far.
+    Output: A detailed summary (2-3 sentences) describing the trajectory, preserving context about zone adherence and effort consistency.
     
     Session History:
     ${historyText}
@@ -537,7 +550,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         addLog(`AI_WARN: Failed to update session context.`);
     }
 
-  }, [selectedPersona, trainingGoal, addLog]);
+  }, [selectedPersona, currentObjective, addLog]);
 
   const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
     const summaries = allSessionSummariesRef.current;
@@ -553,7 +566,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
 
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${trainingGoal}
+    User Goal: ${currentObjective.title} (${currentObjective.prompt})
     Task: The workout session has ended. Generate a final session report based on the context below.
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
     
@@ -585,13 +598,13 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, trainingGoal, addLog, isVoiceEnabled, speakInsight]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight]);
 
   const requestAiInsight = async (summary: MinuteSummary) => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     
     // Construct GOAL context including Mission Profile if available
-    let goalContext = trainingGoal;
+    let goalContext = `${currentObjective.title} (${currentObjective.prompt})`;
     if (missionProfileRef.current) {
         goalContext += `\n\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}`;
     }
@@ -635,7 +648,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
     const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
 
     try {
-      addLog(`AI_REQUEST: Analyzing for goal: "${trainingGoal}" as "${selectedPersona}"...`);
+      addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -725,7 +738,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
         generateSessionSummary();
     }
 
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness]); // Added chattiness dependency
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight]); // Added requestAiInsight and chattiness dependency
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -945,7 +958,7 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Training Objective</label>
                 <select value={trainingGoal} onChange={(e) => setTrainingGoal(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer">
-                  {TRAINING_GOALS.map(g => <option key={g} value={g}>{g}</option>)}
+                  {TRAINING_OBJECTIVES.map(g => <option key={g.title} value={g.title}>{g.title}</option>)}
                 </select>
               </div>
 
@@ -1042,17 +1055,16 @@ Output Style: Use a brief, bulleted list. No conversational filler. The resultan
           </div>
         )}
 
-        {isFullScreen && (
-          <button 
-            onClick={() => setIsFullScreen(false)}
-            className="fixed top-6 left-6 z-[60] px-6 py-2.5 border border-white/20 text-slate-300 hover:text-white hover:border-[#ff003c] hover:bg-[#ff003c]/10 rounded-sm text-xs font-bold uppercase tracking-widest bg-black/90 backdrop-blur-xl transition-all shadow-lg flex items-center gap-2"
-          >
-            <span className="text-[#ff003c] text-lg leading-none">&laquo;</span> Restore View
-          </button>
-        )}
-
         <div className={`grid grid-cols-1 ${!isFullScreen ? 'xl:grid-cols-4 gap-8 items-start' : 'h-[85vh] w-full'}`}>
-          <div className={`${!isFullScreen ? 'xl:col-span-1 space-y-8' : 'w-full h-full'} transition-all duration-500`}>
+          <div className={`${!isFullScreen ? 'xl:col-span-1 space-y-8' : 'w-full h-full relative'} transition-all duration-500`}>
+            {isFullScreen && (
+                <button 
+                  onClick={() => setIsFullScreen(false)}
+                  className="absolute top-6 right-6 z-50 px-6 py-3 bg-black/60 border border-white/10 text-slate-400 hover:text-[#ff003c] hover:border-[#ff003c]/50 font-bold rounded-sm transition-all uppercase text-xs tracking-widest backdrop-blur-md"
+                >
+                  Return to Dashboard
+                </button>
+            )}
             <HeartRateDisplay 
               hr={currentHR} 
               zone={currentZone} 
