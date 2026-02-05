@@ -59,13 +59,17 @@ function cleanInsightText(text: string): string {
 const ENV_WS_URL = (process.env as any).WS_URL || 'ws://localhost:8080';
 const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
+const ENV_DEFAULT_WEIGHT = parseInt((process.env as any).DEFAULT_WEIGHT || '150');
+const ENV_DEFAULT_DURATION = parseInt((process.env as any).DEFAULT_DURATION || '20');
 const ENV_DEFAULT_CHATTINESS = parseInt((process.env as any).DEFAULT_CHATTINESS || '4');
 
 const STORAGE_KEYS = {
   WS: 'aetheraegis_ws_url',
   HEX: 'aetheraegis_device_hex',
   AGE: 'aetheraegis_subject_age',
+  WEIGHT: 'aetheraegis_subject_weight',
   GOAL: 'aetheraegis_training_goal',
+  DURATION: 'aetheraegis_session_duration',
   VOICE: 'aetheraegis_voice_enabled',
   VOICE_NAME: 'aetheraegis_voice_name',
   PERSONA: 'aetheraegis_ai_persona',
@@ -116,11 +120,13 @@ const App: React.FC = () => {
   const [wsUrl, setWsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.WS) || ENV_WS_URL);
   const [deviceIdHex, setDeviceIdHex] = useState(() => localStorage.getItem(STORAGE_KEYS.HEX) || ENV_DEVICE_HEX);
   const [age, setAge] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.AGE) || String(ENV_DEFAULT_AGE)));
+  const [weight, setWeight] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.WEIGHT) || String(ENV_DEFAULT_WEIGHT)));
   const [trainingGoal, setTrainingGoal] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.GOAL);
     const exists = TRAINING_OBJECTIVES.some(o => o.title === stored);
     return exists ? stored! : TRAINING_OBJECTIVES[1].title; // Default to "Low Intensity Weight Loss"
   });
+  const [sessionDurationGoal, setSessionDurationGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.DURATION) || String(ENV_DEFAULT_DURATION)));
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
   const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
@@ -232,7 +238,9 @@ const App: React.FC = () => {
     let contentDebug = `AETHER AEGIS // SESSION LOG\n`;
     contentDebug += `Generated: ${now.toLocaleString()}\n`;
     contentDebug += `Subject Age: ${age}\n`;
+    contentDebug += `Subject Weight: ${weight} lbs\n`;
     contentDebug += `Training Goal: ${currentObjective.title}\n`;
+    contentDebug += `Session Duration Goal: ${sessionDurationGoal} mins\n`;
     contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
@@ -287,7 +295,9 @@ const App: React.FC = () => {
     let contentUser = `AETHER AEGIS // USER SESSION SUMMARY\n`;
     contentUser += `Generated: ${now.toLocaleString()}\n`;
     contentUser += `Subject Age: ${age}\n`;
+    contentUser += `Subject Weight: ${weight} lbs\n`;
     contentUser += `Training Goal: ${currentObjective.title}\n`;
+    contentUser += `Target Duration: ${sessionDurationGoal} mins\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
 
@@ -330,7 +340,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, currentObjective, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
+  }, [age, weight, currentObjective, sessionDurationGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -451,6 +461,7 @@ const App: React.FC = () => {
   const generateMissionProfile = useCallback(async () => {
     const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
 Selected Strategy: ${currentObjective.title}
+Target Duration: ${sessionDurationGoal} minutes
 Contextual Instructions: "${currentObjective.prompt}"
 
 Requirements:
@@ -478,7 +489,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [age, currentObjective, addLog]);
+  }, [age, currentObjective, sessionDurationGoal, addLog]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
@@ -841,7 +852,9 @@ Output Style: concise, structured, and directive. This profile will serve as the
     localStorage.setItem(STORAGE_KEYS.WS, wsUrl);
     localStorage.setItem(STORAGE_KEYS.HEX, deviceIdHex);
     localStorage.setItem(STORAGE_KEYS.AGE, String(age));
+    localStorage.setItem(STORAGE_KEYS.WEIGHT, String(weight));
     localStorage.setItem(STORAGE_KEYS.GOAL, trainingGoal);
+    localStorage.setItem(STORAGE_KEYS.DURATION, String(sessionDurationGoal));
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
     localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
@@ -874,7 +887,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     setIsSessionActive(false);
     setElapsedTime("00:00:00");
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, trainingGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
 
   useEffect(() => {
     connect();
@@ -954,12 +967,28 @@ Output Style: concise, structured, and directive. This profile will serve as the
               </div>
 
               <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Weight (lbs)</label>
+                <input type="number" value={weight} onChange={(e) => setWeight(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-[#ff003c] font-mono text-lg px-3 py-1 w-20 focus:outline-none focus:border-[#ff003c]/50 transition-colors" />
+              </div>
+
+              <div className="h-10 w-px bg-white/5 hidden md:block" />
               
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Training Objective</label>
                 <select value={trainingGoal} onChange={(e) => setTrainingGoal(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer">
                   {TRAINING_OBJECTIVES.map(g => <option key={g.title} value={g.title}>{g.title}</option>)}
                 </select>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Objective</label>
+                <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase text-slate-400 font-bold">Time:</span>
+                    <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 w-16 focus:outline-none focus:border-cyan-400/50 transition-colors" />
+                    <span className="text-[10px] uppercase text-slate-500">Min</span>
+                </div>
               </div>
 
               <div className="h-10 w-px bg-white/5 hidden md:block" />

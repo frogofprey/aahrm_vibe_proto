@@ -22,13 +22,14 @@
 *   **Live Charting**: Render a real-time Area Chart displaying the last 50 data points.
     *   The chart Y-axis must scale dynamically based on the data range and age-predicted max.
     *   The chart must render markers indicating points where AI synchronization occurred.
-*   **Full Screen Mode**: A toggleable view mode that isolates the critical biometric display (Heart Rate & Zones), hiding configuration controls, target zone list, and historical charts. The remaining display must maximize to fill the available screen space. Must include a mechanism to revert to the standard dashboard view.
+*   **Full Screen Mode**: A toggleable view mode that isolates the critical biometric display (Heart Rate & Zones), hiding configuration controls, target zone list, and historical charts. The remaining display must maximize to fill the available screen space.
+    *   **Return Mechanism**: Must include a visible overlay button to revert to the standard dashboard view.
 
 ### 1.3 Session Management
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**: Display the elapsed time of the current active session in `HH:MM:SS` format.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
-*   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age and Goal.
+*   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal.
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
 *   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, and **peak HR**.
@@ -36,9 +37,10 @@
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
         *   Contains full debug details, prompts, raw telemetry, mission profile, mid-term memory, and final report diagnostics.
+        *   Header must include Subject Age, **Subject Weight**, Training Objective, and **Session Duration Goal**.
     2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
         *   A concise summary suitable for long-term memory systems.
-        *   Contains only the Header, Session Intro, Periodic Heart Rate Meta Values (Avg/Max), and the Coaching Insight text for each minute.
+        *   Contains only the Header (including Weight/Duration), Session Intro, Periodic Heart Rate Meta Values (Avg/Max), and the Coaching Insight text for each minute.
         *   Devoid of raw prompts, raw telemetry arrays, and system debug info.
 
 ### 1.4 AI Coaching & Aggregation
@@ -48,7 +50,9 @@
     *   Min BPM
     *   Sample Count
     *   Raw value array
-*   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far. This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
+*   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
+    *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
+    *   This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, and Mission Profile) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
 *   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Aether-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
@@ -60,6 +64,7 @@
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:
     *   Subject Age (determines Heart Rate Zones)
+    *   **Subject Weight** (default 150 lbs)
     *   Training Objective:
         *   Wellness
         *   Low Intensity Weight Loss
@@ -67,6 +72,7 @@
         *   General Weight Loss
         *   Strength Training
         *   High Intensity
+    *   **Session Objective / Duration** (default 20 mins)
     *   WebSocket URL
     *   Device ID (Hex)
     *   Audio/Voice Toggle
