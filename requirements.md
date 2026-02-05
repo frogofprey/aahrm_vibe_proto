@@ -28,19 +28,24 @@
 ### 1.3 Session Management
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**: Display the elapsed time of the current active session in `HH:MM:SS` format.
+*   **Metric Tracking**:
+    *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5.
+    *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender).
+    *   **Gender Input**: Added selector (Male/Female) to support accurate calorie calculation.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal.
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
-*   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, and **peak HR**.
+*   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, **peak HR**, Total Calories, and Total Heart Points.
     *   **Audio**: If the voice profile is enabled, this final report must be read aloud via TTS.
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
         *   Contains full debug details, prompts, raw telemetry, mission profile, mid-term memory, and final report diagnostics.
-        *   Header must include Subject Age, **Subject Weight**, Training Objective, and **Session Duration Goal**.
+        *   Header must include Subject Age, **Subject Weight**, **Subject Gender**, Training Objective, **Session Objectives** (Time, HP, Kcal).
+        *   Body must include per-minute breakdown of Calories and Heart Points.
     2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
         *   A concise summary suitable for long-term memory systems.
-        *   Contains only the Header (including Weight/Duration), Session Intro, Periodic Heart Rate Meta Values (Avg/Max), and the Coaching Insight text for each minute.
+        *   Contains only the Header (including Weight/Duration/Metrics), Session Intro, Periodic Heart Rate Meta Values (Avg/Max), and the Coaching Insight text for each minute.
         *   Devoid of raw prompts, raw telemetry arrays, and system debug info.
 
 ### 1.4 AI Coaching & Aggregation
@@ -48,11 +53,17 @@
     *   Average BPM
     *   Max BPM
     *   Min BPM
+    *   **Calories Burned** (Minute)
+    *   **Heart Points** (Minute)
     *   Sample Count
     *   Raw value array
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
     *   This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
+    *   **Real-Time Objective Injection**: Every minute, the system must append a block to this context containing the live status of the user's progress against their defined goals:
+        *   Current Time / Target Time
+        *   Current Heart Points / Target Heart Points
+        *   Current Calories / Target Calories
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, and Mission Profile) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
 *   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Aether-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
@@ -65,6 +76,7 @@
 *   **User Settings**: Allow users to configure:
     *   Subject Age (determines Heart Rate Zones)
     *   **Subject Weight** (default 150 lbs)
+    *   **Subject Gender** (Male/Female)
     *   Training Objective:
         *   Wellness
         *   Low Intensity Weight Loss
@@ -72,7 +84,11 @@
         *   General Weight Loss
         *   Strength Training
         *   High Intensity
-    *   **Session Objective / Duration** (default 20 mins)
+    *   **Session Targets**:
+        *   **Time** (default 20 mins)
+        *   **Heart Points** (default 30)
+        *   **Calories** (default 100)
+    *   **UI Config**: The configuration UI for Session Targets must use a selector to toggle between editing Time, Heart Points, or Calories, ensuring a clean interface while preserving all three values for tracking.
     *   WebSocket URL
     *   Device ID (Hex)
     *   Audio/Voice Toggle
@@ -84,6 +100,7 @@
     *   **Mid-Term Memory** updates should be visually distinct (e.g., Purple).
     *   **Mission Profile** events should be visually distinct (e.g., Cyan).
     *   **Final Report** events should be visually distinct (e.g., Emerald/Amber).
+    *   **Metric Updates** must be logged every minute.
 *   **Telemetry Stream**: Provide a toggle to show/hide raw high-frequency data logging to reduce visual noise.
 
 ## 2. Non-Functional Requirements

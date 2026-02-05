@@ -17,6 +17,8 @@ export interface MinuteSummary {
   isAnalyzing?: boolean;
   prompt?: string;
   sessionContextSummary?: string;
+  heartPoints: number;
+  calories: number;
 }
 
 export enum ConnectionStatus {

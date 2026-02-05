@@ -61,6 +61,8 @@ const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
 const ENV_DEFAULT_WEIGHT = parseInt((process.env as any).DEFAULT_WEIGHT || '150');
 const ENV_DEFAULT_DURATION = parseInt((process.env as any).DEFAULT_DURATION || '20');
+const ENV_DEFAULT_HP_GOAL = parseInt((process.env as any).DEFAULT_HP_GOAL || '30');
+const ENV_DEFAULT_CAL_GOAL = parseInt((process.env as any).DEFAULT_CAL_GOAL || '100');
 const ENV_DEFAULT_CHATTINESS = parseInt((process.env as any).DEFAULT_CHATTINESS || '4');
 
 const STORAGE_KEYS = {
@@ -68,8 +70,11 @@ const STORAGE_KEYS = {
   HEX: 'aetheraegis_device_hex',
   AGE: 'aetheraegis_subject_age',
   WEIGHT: 'aetheraegis_subject_weight',
+  GENDER: 'aetheraegis_subject_gender',
   GOAL: 'aetheraegis_training_goal',
   DURATION: 'aetheraegis_session_duration',
+  HP_GOAL: 'aetheraegis_hp_goal',
+  CAL_GOAL: 'aetheraegis_cal_goal',
   VOICE: 'aetheraegis_voice_enabled',
   VOICE_NAME: 'aetheraegis_voice_name',
   PERSONA: 'aetheraegis_ai_persona',
@@ -82,12 +87,12 @@ const HR_MIN_VALID = 40;
 const HR_MAX_VALID = 220;
 
 const TRAINING_OBJECTIVES = [
-  { title: "Wellness", prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target" },
-  { title: "Low Intensity Weight Loss", prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
-  { title: "Mid Intensity Weight Loss", prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
-  { title: "General Weight Loss", prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods" },
-  { title: "Strength Training", prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods" },
-  { title: "High Intensity", prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute" }
+  { title: "Wellness", targetZones: [0], prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target" },
+  { title: "Low Intensity Weight Loss", targetZones: [1], prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
+  { title: "Mid Intensity Weight Loss", targetZones: [2], prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
+  { title: "General Weight Loss", targetZones: [1, 2], prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods" },
+  { title: "Strength Training", targetZones: [2, 3], prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods" },
+  { title: "High Intensity", targetZones: [3, 4], prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute" }
 ];
 
 const VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
@@ -108,11 +113,13 @@ Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
 Goal Customization: Your feedback MUST be focused on the user's specific objective: {{GOAL}}.
+Context Usage: You will receive an [OBJECTIVE STATUS TRACKER]. This is purely contextual input for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change.
 4-6: Notable trend shift or minor zone boundary approach.
 7-10: Critical breach, safety alert, or major mission milestone.
 Output format: Score: [X] | [Analysis Text]
+STRICT FORMATTING: Your response MUST start with "Score: [X] |". Do not include any other text, markdown, or headers before this.
 Goal: Provide a concise (1-sentence) insight after each packet that helps the user optimize their current session for their specific objective, formatted strictly as requested.`;
 
 const App: React.FC = () => {
@@ -121,12 +128,19 @@ const App: React.FC = () => {
   const [deviceIdHex, setDeviceIdHex] = useState(() => localStorage.getItem(STORAGE_KEYS.HEX) || ENV_DEVICE_HEX);
   const [age, setAge] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.AGE) || String(ENV_DEFAULT_AGE)));
   const [weight, setWeight] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.WEIGHT) || String(ENV_DEFAULT_WEIGHT)));
+  const [gender, setGender] = useState(() => localStorage.getItem(STORAGE_KEYS.GENDER) || 'Male');
   const [trainingGoal, setTrainingGoal] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.GOAL);
     const exists = TRAINING_OBJECTIVES.some(o => o.title === stored);
     return exists ? stored! : TRAINING_OBJECTIVES[1].title; // Default to "Low Intensity Weight Loss"
   });
+  
+  // Session Objectives
   const [sessionDurationGoal, setSessionDurationGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.DURATION) || String(ENV_DEFAULT_DURATION)));
+  const [sessionHeartPointsGoal, setSessionHeartPointsGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.HP_GOAL) || String(ENV_DEFAULT_HP_GOAL)));
+  const [sessionCaloriesGoal, setSessionCaloriesGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CAL_GOAL) || String(ENV_DEFAULT_CAL_GOAL)));
+  const [activeTargetView, setActiveTargetView] = useState<'Time' | 'HeartPoints' | 'Calories'>('Time');
+
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
   const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
@@ -142,6 +156,7 @@ const App: React.FC = () => {
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState("00:00:00");
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [introText, setIntroText] = useState<string | null>(null);
 
   const [dataPoints, setDataPoints] = useState<HeartRateData[]>([]);
   const [currentHR, setCurrentHR] = useState<number | null>(null);
@@ -160,6 +175,9 @@ const App: React.FC = () => {
   const logIdRef = useRef(0);
   const sessionActiveRef = useRef(isSessionActive); // Mirror for WS callback
   
+  // Session Metrics Refs
+  const runningMetricsRef = useRef<{ heartPoints: number; calories: number; compliantMinutes: number }>({ heartPoints: 0, calories: 0, compliantMinutes: 0 });
+
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
   const sessionIntroRef = useRef<{ prompt: string; text: string } | null>(null);
@@ -232,6 +250,11 @@ const App: React.FC = () => {
     const dd = String(now.getDate()).padStart(2, '0');
     const hh = String(now.getHours()).padStart(2, '0');
     const min = String(now.getMinutes()).padStart(2, '0');
+
+    // Calculate Final Metric Totals
+    const totalPoints = allSessionSummariesRef.current.reduce((acc, curr) => acc + curr.heartPoints, 0);
+    const totalCalories = allSessionSummariesRef.current.reduce((acc, curr) => acc + curr.calories, 0);
+    const totalMinutes = allSessionSummariesRef.current.length;
     
     // --- FILE 1: FULL DEBUG LOG ---
     const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
@@ -239,8 +262,12 @@ const App: React.FC = () => {
     contentDebug += `Generated: ${now.toLocaleString()}\n`;
     contentDebug += `Subject Age: ${age}\n`;
     contentDebug += `Subject Weight: ${weight} lbs\n`;
+    contentDebug += `Subject Gender: ${gender}\n`;
     contentDebug += `Training Goal: ${currentObjective.title}\n`;
-    contentDebug += `Session Duration Goal: ${sessionDurationGoal} mins\n`;
+    contentDebug += `OBJECTIVES: Time ${sessionDurationGoal}m | HP ${sessionHeartPointsGoal} | Cal ${sessionCaloriesGoal}\n`;
+    contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
+    contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
+    contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
     contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
@@ -273,6 +300,7 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
         if (s.sessionContextSummary) {
             contentDebug += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary}\n`;
         }
@@ -297,7 +325,10 @@ const App: React.FC = () => {
     contentUser += `Subject Age: ${age}\n`;
     contentUser += `Subject Weight: ${weight} lbs\n`;
     contentUser += `Training Goal: ${currentObjective.title}\n`;
-    contentUser += `Target Duration: ${sessionDurationGoal} mins\n`;
+    contentUser += `Objectives: Time ${sessionDurationGoal}m | HP ${sessionHeartPointsGoal} | Cal ${sessionCaloriesGoal}\n`;
+    contentUser += `Total Calories: ${totalCalories.toFixed(1)} kcal\n`;
+    contentUser += `Total Heart Points: ${totalPoints}\n`;
+    contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
 
@@ -310,6 +341,7 @@ const App: React.FC = () => {
         contentUser += `[TIMELINE]\n`;
         allSessionSummariesRef.current.forEach((s, index) => {
             contentUser += `Minute ${index + 1} (${s.timestamp}): Avg ${s.avg} BPM | Max ${s.max} BPM\n`;
+            contentUser += `Metrics: ${s.calories.toFixed(1)} kcal, ${s.heartPoints} HP\n`;
             contentUser += `Coach: "${s.insight || "N/A"}"\n\n`;
         });
     }
@@ -340,7 +372,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, currentObjective, sessionDurationGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -459,9 +491,22 @@ const App: React.FC = () => {
   }, [isVoiceEnabled, selectedVoice, addLog, processAudioQueue]);
 
   const generateMissionProfile = useCallback(async () => {
+    let targetContext = "";
+    switch (activeTargetView) {
+        case 'Time':
+            targetContext = `Target Duration: ${sessionDurationGoal} minutes`;
+            break;
+        case 'HeartPoints':
+            targetContext = `Target Heart Points: ${sessionHeartPointsGoal}`;
+            break;
+        case 'Calories':
+            targetContext = `Target Calories: ${sessionCaloriesGoal} kcal`;
+            break;
+    }
+
     const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
 Selected Strategy: ${currentObjective.title}
-Target Duration: ${sessionDurationGoal} minutes
+${targetContext}
 Contextual Instructions: "${currentObjective.prompt}"
 
 Requirements:
@@ -489,14 +534,20 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [age, currentObjective, sessionDurationGoal, addLog]);
+  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    
+    const objectivesContext = `Mission Parameters:\n- Target Duration: ${sessionDurationGoal} minutes\n- Target Heart Points: ${sessionHeartPointsGoal}\n- Target Calories: ${sessionCaloriesGoal} kcal`;
+
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
+    ${objectivesContext}
+    
     Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
+    Instruction: You are encouraged to reference the Mission Parameters naturally to set the stage (e.g., "We are aiming for ${sessionCaloriesGoal} calories today"), but do not output them as a list. Speak to the user, don't read the settings back to them.
     Constraint: Maximum 25 words. Strictly adhere to persona.
     `;
 
@@ -515,6 +566,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
       
       // Store in ref for file log
       sessionIntroRef.current = { prompt, text: introText };
+      setIntroText(introText);
       
       if (isVoiceEnabled) {
           // Small delay to ensure AudioContext is fully ready after user click
@@ -524,7 +576,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, isVoiceEnabled, addLog, speakInsight]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, addLog, speakInsight]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect all past data
@@ -574,6 +626,9 @@ Output Style: concise, structured, and directive. This profile will serve as the
     // Calculate simple stats for prompt
     const avgHr = Math.round(summaries.reduce((a,b)=>a+b.avg,0)/summaries.length);
     const peakHr = Math.max(...summaries.map(s => s.max));
+    const totalCalories = summaries.reduce((acc, curr) => acc + curr.calories, 0);
+    const totalPoints = summaries.reduce((acc, curr) => acc + curr.heartPoints, 0);
+    const totalMinutes = summaries.length;
 
     const prompt = `
     Persona: ${personaIdentity}
@@ -581,7 +636,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
     Task: The workout session has ended. Generate a final session report based on the context below.
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
     
-    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM.
+    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM, Calories ${totalCalories.toFixed(0)}, Heart Points ${totalPoints}.
+    Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes matching target zones.
     Mid-Term Trend: ${midTermContext || "N/A"}
     Last Minute Insight: ${lastSummary.insight || "N/A"}
     `;
@@ -653,10 +709,31 @@ Output Style: concise, structured, and directive. This profile will serve as the
     // --- MID-TERM MEMORY INJECTION ---
     let memoryContext = "";
     if (currentSessionContextRef.current) {
-        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n\n`;
+        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n`;
     }
+    
+    // --- REAL-TIME OBJECTIVE STATUS INJECTION ---
+    // Calculate estimated elapsed time in minutes for display context
+    const currentElapsedTimeMinutes = ((Date.now() - (sessionStartTime || Date.now())) / 60000).toFixed(1);
+    
+    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n`;
+    if (activeTargetView === 'Time') {
+        objectiveStatus += `- Time: ${currentElapsedTimeMinutes} / ${sessionDurationGoal} mins`;
+    } else if (activeTargetView === 'HeartPoints') {
+        objectiveStatus += `- Heart Points: ${runningMetricsRef.current.heartPoints} / ${sessionHeartPointsGoal}`;
+    } else if (activeTargetView === 'Calories') {
+        objectiveStatus += `- Calories: ${runningMetricsRef.current.calories.toFixed(0)} / ${sessionCaloriesGoal} kcal`;
+    }
+    
+    const totalMinutes = allSessionSummariesRef.current.length;
+    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes in target zone`;
+    objectiveStatus += `\n(System Context: Use the following metrics as the factual foundation for your observations. Translate these values into your persona's voice—focus on the 'State of the Mission' rather than the raw digits. Do not replicate the list format; simply internalize the data to inform your judgment.)`;
+    
+    // Append objective status to the memory context block (or create if empty)
+    memoryContext += `\n${objectiveStatus}\n\n`;
 
-    const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
+
+    const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
@@ -724,15 +801,60 @@ Output Style: concise, structured, and directive. This profile will serve as the
     if (values.length === 0) return;
     
     const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const avgHr = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+    const maxVal = Math.max(...values);
+    const minVal = Math.min(...values);
+
+    // --- Heart Points Logic ---
+    const maxHr = 220 - age;
+    const zone2Min = maxHr * 0.6;
+    const zone4Min = maxHr * 0.8;
+    let points = 0;
+    if (avgHr >= zone4Min) points = 2;
+    else if (avgHr >= zone2Min) points = 1;
+
+    // --- Compliance Logic ---
+    // Determine current zone index for the minute average
+    const zoneIndex = zones.findIndex(z => avgHr >= z.min && avgHr < z.max);
+    // If not found but above max defined zone, default to highest zone (Index 4)
+    const finalZoneIndex = zoneIndex === -1 && avgHr >= zones[zones.length - 1].min ? zones.length - 1 : zoneIndex;
+    
+    let isCompliant = false;
+    // Check if the calculated zone index is in the target zones for the current objective
+    // Note: zones are 0-indexed in array (Zone 1 = index 0)
+    if (finalZoneIndex !== -1 && currentObjective.targetZones.includes(finalZoneIndex)) {
+        isCompliant = true;
+    }
+
+    // --- Calorie Burn Logic (Keytel Equation) ---
+    const weightKg = weight * 0.453592;
+    let calories = 0;
+    // Standard Keytel Equation
+    // Male: C/min = (-55.0969 + 0.6309 x HR + 0.1988 x W + 0.2017 x A) / 4.184
+    // Female: C/min = (-20.4022 + 0.4472 x HR - 0.1263 x W + 0.074 x A) / 4.184
+    if (gender === 'Male') {
+       calories = (-55.0969 + (0.6309 * avgHr) + (0.1988 * weightKg) + (0.2017 * age)) / 4.184;
+    } else {
+       calories = (-20.4022 + (0.4472 * avgHr) - (0.1263 * weightKg) + (0.074 * age)) / 4.184;
+    }
+    calories = Math.max(0, calories); // Prevent negative calories
+
+    // Update Session Running Totals
+    runningMetricsRef.current.heartPoints += points;
+    runningMetricsRef.current.calories += calories;
+    if (isCompliant) runningMetricsRef.current.compliantMinutes += 1;
+
     const newSummary: MinuteSummary = {
       id: crypto.randomUUID(),
       timestamp,
-      avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
-      max: Math.max(...values),
-      min: Math.min(...values),
+      avg: avgHr,
+      max: maxVal,
+      min: minVal,
       sampleCount: values.length,
       values,
-      isAnalyzing: true
+      isAnalyzing: true,
+      heartPoints: points,
+      calories: calories
     };
 
     // Store in full session log history
@@ -740,6 +862,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
+    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'}`);
     
     // Trigger standard analysis
     requestAiInsight(newSummary);
@@ -749,7 +872,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
         generateSessionSummary();
     }
 
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight]); // Added requestAiInsight and chattiness dependency
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective]);
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -853,8 +976,11 @@ Output Style: concise, structured, and directive. This profile will serve as the
     localStorage.setItem(STORAGE_KEYS.HEX, deviceIdHex);
     localStorage.setItem(STORAGE_KEYS.AGE, String(age));
     localStorage.setItem(STORAGE_KEYS.WEIGHT, String(weight));
+    localStorage.setItem(STORAGE_KEYS.GENDER, gender);
     localStorage.setItem(STORAGE_KEYS.GOAL, trainingGoal);
     localStorage.setItem(STORAGE_KEYS.DURATION, String(sessionDurationGoal));
+    localStorage.setItem(STORAGE_KEYS.HP_GOAL, String(sessionHeartPointsGoal));
+    localStorage.setItem(STORAGE_KEYS.CAL_GOAL, String(sessionCaloriesGoal));
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
     localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
@@ -885,9 +1011,10 @@ Output Style: concise, structured, and directive. This profile will serve as the
     finalSessionReportRef.current = null; // Clear final report
     setSummaries([]);
     setIsSessionActive(false);
+    setIntroText(null);
     setElapsedTime("00:00:00");
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
 
   useEffect(() => {
     connect();
@@ -935,11 +1062,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
       setElapsedTime("00:00:00");
       currentMinuteRef.current = []; // Clear buffer
       allSessionSummariesRef.current = []; // Clear session history
+      runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0 }; // Reset metrics
       sessionIntroRef.current = null; // Clear old intro
       missionProfileRef.current = null; // Clear old profile
       currentSessionContextRef.current = ""; // Clear old memory
       finalSessionReportRef.current = null; // Clear old final report
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
+      setIntroText(null);
       addLog("SESSION: Workout started. Timer active.");
 
       // Trigger Start-of-Session AI Tasks
@@ -950,9 +1079,10 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
   // Compute the latest cleaned insight for display
   const latestInsightCleaned = useMemo(() => {
-    if (summaries.length === 0 || !summaries[0].insight) return undefined;
-    return cleanInsightText(summaries[0].insight);
-  }, [summaries]);
+    if (summaries.length > 0 && summaries[0].insight) return cleanInsightText(summaries[0].insight);
+    if (introText) return cleanInsightText(introText);
+    return undefined;
+  }, [summaries, introText]);
 
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center relative">
@@ -973,6 +1103,14 @@ Output Style: concise, structured, and directive. This profile will serve as the
                 <input type="number" value={weight} onChange={(e) => setWeight(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-[#ff003c] font-mono text-lg px-3 py-1 w-20 focus:outline-none focus:border-[#ff003c]/50 transition-colors" />
               </div>
 
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Gender</label>
+                <select value={gender} onChange={(e) => setGender(e.target.value)} className="bg-black border border-white/10 text-[#ff003c] font-mono text-lg px-3 py-1 w-24 focus:outline-none focus:border-[#ff003c]/50 transition-colors appearance-none cursor-pointer">
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+              </div>
+
               <div className="h-10 w-px bg-white/5 hidden md:block" />
               
               <div className="flex flex-col">
@@ -983,11 +1121,36 @@ Output Style: concise, structured, and directive. This profile will serve as the
               </div>
 
               <div className="flex flex-col">
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Objective</label>
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Target Config</label>
                 <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase text-slate-400 font-bold">Time:</span>
-                    <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 w-16 focus:outline-none focus:border-cyan-400/50 transition-colors" />
-                    <span className="text-[10px] uppercase text-slate-500">Min</span>
+                  <select 
+                    value={activeTargetView} 
+                    onChange={(e) => setActiveTargetView(e.target.value as any)}
+                    className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer w-24"
+                  >
+                    <option value="Time">Duration</option>
+                    <option value="HeartPoints">Heart Pts</option>
+                    <option value="Calories">Calories</option>
+                  </select>
+                  
+                  {activeTargetView === 'Time' && (
+                     <div className="relative">
+                        <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
+                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">m</span>
+                     </div>
+                  )}
+                  {activeTargetView === 'HeartPoints' && (
+                     <div className="relative">
+                        <input type="number" value={sessionHeartPointsGoal} onChange={(e) => setSessionHeartPointsGoal(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
+                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">pt</span>
+                     </div>
+                  )}
+                  {activeTargetView === 'Calories' && (
+                     <div className="relative">
+                        <input type="number" value={sessionCaloriesGoal} onChange={(e) => setSessionCaloriesGoal(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
+                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">kc</span>
+                     </div>
+                  )}
                 </div>
               </div>
 
@@ -1119,7 +1282,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
           {!isFullScreen && (
             <div className="xl:col-span-3 space-y-8">
               <HeartRateChart data={dataPoints} activeColor={currentZone?.color || '#475569'} age={age} zones={zones} />
-              <AggregatorPanel summaries={summaries} />
+              <AggregatorPanel summaries={summaries} introText={introText} />
             </div>
           )}
         </div>

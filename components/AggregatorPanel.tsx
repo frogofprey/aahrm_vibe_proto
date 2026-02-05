@@ -1,12 +1,12 @@
-
 import React from 'react';
 import { MinuteSummary } from '../types';
 
 interface AggregatorPanelProps {
   summaries: MinuteSummary[];
+  introText?: string | null;
 }
 
-const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries }) => {
+const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText }) => {
   return (
     <div className="w-full bg-slate-950/40 border border-cyan-500/30 p-4 rounded-sm backdrop-blur-sm relative overflow-hidden">
       {/* Visual Accent */}
@@ -28,19 +28,34 @@ const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries }) => {
 
       <div className="space-y-4 font-mono">
         {summaries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 border border-cyan-500/10 bg-cyan-500/[0.02] space-y-4">
-            <div className="flex gap-2">
-              {[...Array(3)].map((_, i) => (
-                <div key={i} className="w-2 h-2 bg-cyan-500/50 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
-              ))}
+          introText ? (
+            <div className="flex flex-col p-4 bg-cyan-500/5 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.1)] gap-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
+                <div className="flex items-center justify-between border-b border-cyan-500/10 pb-2">
+                    <span className="text-[10px] text-cyan-500 font-bold uppercase tracking-widest">SESSION INITIALIZED</span>
+                    <span className="text-[9px] text-cyan-700 font-mono uppercase">AI_UPLINK: ACTIVE</span>
+                </div>
+                <div className="flex items-start gap-3">
+                     <div className="text-[9px] uppercase font-black text-cyan-600 tracking-tighter bg-cyan-500/10 px-1.5 py-0.5 mt-0.5">BIO-ANALYST</div>
+                     <p className="text-[11px] text-cyan-100/90 leading-relaxed italic">
+                        {introText}
+                     </p>
+                </div>
             </div>
-            <div className="text-[10px] text-cyan-500 font-bold uppercase tracking-[0.2em]">
-              Initial Diagnostic Phase Initialized...
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 border border-cyan-500/10 bg-cyan-500/[0.02] space-y-4">
+              <div className="flex gap-2">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="w-2 h-2 bg-cyan-500/50 animate-bounce" style={{ animationDelay: `${i * 0.2}s` }} />
+                ))}
+              </div>
+              <div className="text-[10px] text-cyan-500 font-bold uppercase tracking-[0.2em]">
+                Initial Diagnostic Phase Initialized...
+              </div>
+              <div className="text-[8px] text-cyan-700 uppercase tracking-widest text-center max-w-xs">
+                Synchronizing with primary sensor array. Buffering telemetry for 60s baseline analysis.
+              </div>
             </div>
-            <div className="text-[8px] text-cyan-700 uppercase tracking-widest text-center max-w-xs">
-              Synchronizing with primary sensor array. Buffering telemetry for 60s baseline analysis.
-            </div>
-          </div>
+          )
         ) : (
           summaries.map((s) => (
             <div 
