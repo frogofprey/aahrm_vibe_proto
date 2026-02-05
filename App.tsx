@@ -157,6 +157,7 @@ const App: React.FC = () => {
   const [elapsedTime, setElapsedTime] = useState("00:00:00");
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [introText, setIntroText] = useState<string | null>(null);
+  const [finalReportText, setFinalReportText] = useState<string | null>(null);
 
   const [dataPoints, setDataPoints] = useState<HeartRateData[]>([]);
   const [currentHR, setCurrentHR] = useState<number | null>(null);
@@ -256,6 +257,16 @@ const App: React.FC = () => {
     const totalCalories = allSessionSummariesRef.current.reduce((acc, curr) => acc + curr.calories, 0);
     const totalMinutes = allSessionSummariesRef.current.length;
     
+    // Construct relevant objective line
+    let activeObjectiveStr = "";
+    if (activeTargetView === 'Time') {
+        activeObjectiveStr = `Time ${sessionDurationGoal}m`;
+    } else if (activeTargetView === 'HeartPoints') {
+        activeObjectiveStr = `Heart Points ${sessionHeartPointsGoal}`;
+    } else if (activeTargetView === 'Calories') {
+        activeObjectiveStr = `Calories ${sessionCaloriesGoal} kcal`;
+    }
+
     // --- FILE 1: FULL DEBUG LOG ---
     const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
     let contentDebug = `AETHER AEGIS // SESSION LOG\n`;
@@ -264,7 +275,7 @@ const App: React.FC = () => {
     contentDebug += `Subject Weight: ${weight} lbs\n`;
     contentDebug += `Subject Gender: ${gender}\n`;
     contentDebug += `Training Goal: ${currentObjective.title}\n`;
-    contentDebug += `OBJECTIVES: Time ${sessionDurationGoal}m | HP ${sessionHeartPointsGoal} | Cal ${sessionCaloriesGoal}\n`;
+    contentDebug += `OBJECTIVES: ${activeObjectiveStr}\n`;
     contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
     contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
     contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
@@ -325,7 +336,7 @@ const App: React.FC = () => {
     contentUser += `Subject Age: ${age}\n`;
     contentUser += `Subject Weight: ${weight} lbs\n`;
     contentUser += `Training Goal: ${currentObjective.title}\n`;
-    contentUser += `Objectives: Time ${sessionDurationGoal}m | HP ${sessionHeartPointsGoal} | Cal ${sessionCaloriesGoal}\n`;
+    contentUser += `Objectives: ${activeObjectiveStr}\n`;
     contentUser += `Total Calories: ${totalCalories.toFixed(1)} kcal\n`;
     contentUser += `Total Heart Points: ${totalPoints}\n`;
     contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
@@ -372,7 +383,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -539,7 +550,19 @@ Output Style: concise, structured, and directive. This profile will serve as the
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     
-    const objectivesContext = `Mission Parameters:\n- Target Duration: ${sessionDurationGoal} minutes\n- Target Heart Points: ${sessionHeartPointsGoal}\n- Target Calories: ${sessionCaloriesGoal} kcal`;
+    let objectivesContext = "";
+    let examplePhrase = "";
+
+    if (activeTargetView === 'Time') {
+        objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
+        examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
+    } else if (activeTargetView === 'HeartPoints') {
+        objectivesContext = `Mission Parameter: Target Heart Points: ${sessionHeartPointsGoal}`;
+        examplePhrase = `"Let's hit ${sessionHeartPointsGoal} points today"`;
+    } else if (activeTargetView === 'Calories') {
+        objectivesContext = `Mission Parameter: Target Calories: ${sessionCaloriesGoal} kcal`;
+        examplePhrase = `"We are burning ${sessionCaloriesGoal} calories today"`;
+    }
 
     const prompt = `
     Persona: ${personaIdentity}
@@ -547,7 +570,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     ${objectivesContext}
     
     Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
-    Instruction: You are encouraged to reference the Mission Parameters naturally to set the stage (e.g., "We are aiming for ${sessionCaloriesGoal} calories today"), but do not output them as a list. Speak to the user, don't read the settings back to them.
+    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them.
     Constraint: Maximum 25 words. Strictly adhere to persona.
     `;
 
@@ -576,7 +599,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, addLog, speakInsight]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect all past data
@@ -654,6 +677,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
         
         const reportText = response.text || "Session concluded. Data saved.";
         finalSessionReportRef.current = { prompt, text: reportText };
+        setFinalReportText(reportText); // Update State for UI
         addLog(`[FINAL_REPORT] ${reportText}`);
 
         // Trigger TTS for final report if voice is enabled
@@ -1009,6 +1033,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     missionProfileRef.current = null; // Clear mission profile
     currentSessionContextRef.current = ""; // Clear memory ref
     finalSessionReportRef.current = null; // Clear final report
+    setFinalReportText(null); // Clear UI report
     setSummaries([]);
     setIsSessionActive(false);
     setIntroText(null);
@@ -1067,6 +1092,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
       missionProfileRef.current = null; // Clear old profile
       currentSessionContextRef.current = ""; // Clear old memory
       finalSessionReportRef.current = null; // Clear old final report
+      setFinalReportText(null); // Clear UI report
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
       setIntroText(null);
       addLog("SESSION: Workout started. Timer active.");
@@ -1079,10 +1105,11 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
   // Compute the latest cleaned insight for display
   const latestInsightCleaned = useMemo(() => {
+    if (finalReportText) return cleanInsightText(finalReportText);
     if (summaries.length > 0 && summaries[0].insight) return cleanInsightText(summaries[0].insight);
     if (introText) return cleanInsightText(introText);
     return undefined;
-  }, [summaries, introText]);
+  }, [summaries, introText, finalReportText]);
 
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center relative">
@@ -1282,7 +1309,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
           {!isFullScreen && (
             <div className="xl:col-span-3 space-y-8">
               <HeartRateChart data={dataPoints} activeColor={currentZone?.color || '#475569'} age={age} zones={zones} />
-              <AggregatorPanel summaries={summaries} introText={introText} />
+              <AggregatorPanel summaries={summaries} introText={introText} finalReportText={finalReportText} />
             </div>
           )}
         </div>

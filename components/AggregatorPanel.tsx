@@ -4,9 +4,10 @@ import { MinuteSummary } from '../types';
 interface AggregatorPanelProps {
   summaries: MinuteSummary[];
   introText?: string | null;
+  finalReportText?: string | null;
 }
 
-const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText }) => {
+const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText, finalReportText }) => {
   return (
     <div className="w-full bg-slate-950/40 border border-cyan-500/30 p-4 rounded-sm backdrop-blur-sm relative overflow-hidden">
       {/* Visual Accent */}
@@ -27,6 +28,21 @@ const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText 
       </div>
 
       <div className="space-y-4 font-mono">
+        {finalReportText && (
+           <div className="flex flex-col p-4 bg-emerald-500/5 border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.1)] gap-3 mb-4 animate-in fade-in slide-in-from-top-2 duration-700">
+               <div className="flex items-center justify-between border-b border-emerald-500/10 pb-2">
+                   <span className="text-[10px] text-emerald-500 font-bold uppercase tracking-widest">MISSION DEBRIEF</span>
+                   <span className="text-[9px] text-emerald-700 font-mono uppercase">STATUS: COMPLETE</span>
+               </div>
+               <div className="flex items-start gap-3">
+                   <div className="text-[9px] uppercase font-black text-emerald-600 tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 mt-0.5">FINAL_DIAGNOSTIC</div>
+                   <p className="text-[11px] text-emerald-100/90 leading-relaxed italic">
+                       {finalReportText}
+                   </p>
+               </div>
+           </div>
+        )}
+        
         {summaries.length === 0 ? (
           introText ? (
             <div className="flex flex-col p-4 bg-cyan-500/5 border border-cyan-500/20 shadow-[0_0_15px_rgba(6,182,212,0.1)] gap-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
