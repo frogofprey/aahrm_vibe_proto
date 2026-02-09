@@ -27,16 +27,20 @@
 
 ### 1.3 Session Management
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
-*   **Duration Tracking**: Display the elapsed time of the current active session in `HH:MM:SS` format.
+*   **Duration Tracking**:
+    *   **Wall Clock**: Display the total elapsed time of the session in `HH:MM:SS` format.
+    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP`, `RECOVERY`, or `PAUSE` must not count towards the Time Objective.
 *   **Metric Tracking**:
-    *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5.
-    *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender).
+    *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5. *Accumulates during ALL states (including Warmup/Recovery).*
+    *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender). *Accumulates during ALL states.*
+    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. This ensures users are not penalized for non-performance states (Warmup/Recovery).
     *   **Gender Input**: Added selector (Male/Female) to support accurate calorie calculation.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal.
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
 *   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, **peak HR**, Total Calories, and Total Heart Points.
+    *   **Compliance Data**: The report must cite compliance based on Performance Minutes (e.g., "15/20 performance minutes compliant").
     *   **Audio**: If the voice profile is enabled, this final report must be read aloud via TTS.
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
@@ -49,21 +53,17 @@
         *   Devoid of raw prompts, raw telemetry arrays, and system debug info.
 
 ### 1.4 AI Coaching & Aggregation
-*   **Minute Packets**: Aggregate telemetry data into 60-second summaries containing:
-    *   Average BPM
-    *   Max BPM
-    *   Min BPM
-    *   **Calories Burned** (Minute)
-    *   **Heart Points** (Minute)
-    *   Sample Count
-    *   Raw value array
+*   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
+    *   **Frame State Priority**: The "State" of a minute is determined by the highest priority state observed during that minute: `WARMUP` > `RECOVERY` > `ERROR` > `PAUSE` > `MAIN_ACTIVE`.
+    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), Sample Count, Frame State, Raw value array.
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
     *   This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
     *   **Real-Time Objective Injection**: Every minute, the system must append a block to this context containing the live status of the user's progress against their defined goals:
-        *   Current Time / Target Time
+        *   **Performance Time** / Target Time
         *   Current Heart Points / Target Heart Points
         *   Current Calories / Target Calories
+        *   Compliance: X/Y **Performance Minutes**
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, and Mission Profile) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
 *   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Aether-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
@@ -102,6 +102,31 @@
     *   **Final Report** events should be visually distinct (e.g., Emerald/Amber).
     *   **Metric Updates** must be logged every minute.
 *   **Telemetry Stream**: Provide a toggle to show/hide raw high-frequency data logging to reduce visual noise.
+
+### 1.7 Session State Machine
+The application implements a state machine to track the user's workout phase. Transitions are driven by **Elapsed Time** and **Heart Rate (HR)** relative to the Target Zone minimum (defined by the Mission Profile/Objective).
+
+*   **State Definitions**:
+    *   **IDLE**: Session is stopped or has not started.
+    *   **INIT**: Session started; performing initial AI handshakes and loading mission profile (< 5 seconds).
+    *   **WARMUP**: Early phase; HR is below target, or session duration is < 2 minutes. Time does *not* count towards Performance Duration.
+    *   **MAIN_ACTIVE**: Primary workout phase; HR is within or above target. Time counts towards Performance Duration.
+    *   **PAUSE**: Intensity drop during the main phase (HR < Target for > 30s). Time does *not* count towards Performance Duration.
+    *   **BONUS_ACTIVE**: Session Duration Goal met, but user is maintaining target intensity. Time counts towards Performance Duration.
+    *   **RECOVERY**: Session Duration Goal met, user has cooled down (HR < Target). Time does *not* count towards Performance Duration.
+    *   **ERROR**: System or Connection failure.
+
+*   **Strategies**:
+    1.  **Fixed Strategy** (Used for: Wellness, Strength Training, High Intensity):
+        *   Transitions immediately from `INIT` to `MAIN_ACTIVE`.
+        *   Bypasses `WARMUP` and `PAUSE` logic to support interval-based or low-intensity targets where "drops" are expected.
+    2.  **Normal Strategy** (Used for: Low/Mid/General Weight Loss):
+        *   **Warmup Phase**: Starts in `WARMUP`. Transitions to `MAIN_ACTIVE` if Duration >= 2 mins OR HR >= Target Min (Debounce: 5s).
+        *   **Active Phase**: Transitions from `MAIN_ACTIVE` to `PAUSE` if HR drops below Target Min for > 30 seconds.
+        *   **Resume**: Transitions from `PAUSE` back to `MAIN_ACTIVE` if HR recovers to >= Target Min (Debounce: 5s).
+        *   **Goal Completion**: Once Session Duration Goal is met:
+            *   If HR >= Target Min -> `BONUS_ACTIVE`.
+            *   If HR < Target Min -> `RECOVERY` (Debounce: 5s).
 
 ## 2. Non-Functional Requirements
 

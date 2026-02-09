@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary } from './types';
+import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
 import HeartRateChart from './components/HeartRateChart';
@@ -53,6 +53,18 @@ function cleanInsightText(text: string): string {
   return text.replace(/^Score:\s*\[?[\d.]+\]?\s*\|\s*/i, '').trim();
 }
 
+// --- Token Usage Extraction Utility ---
+function extractUsage(response: any): TokenUsage | undefined {
+    if (response.usageMetadata) {
+        return {
+            input: response.usageMetadata.promptTokenCount || 0,
+            output: response.usageMetadata.candidatesTokenCount || 0,
+            total: response.usageMetadata.totalTokenCount || 0
+        };
+    }
+    return undefined;
+}
+
 /**
  * SECURE CONFIGURATION BLOCK
  */
@@ -87,12 +99,42 @@ const HR_MIN_VALID = 40;
 const HR_MAX_VALID = 220;
 
 const TRAINING_OBJECTIVES = [
-  { title: "Wellness", targetZones: [0], prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target" },
-  { title: "Low Intensity Weight Loss", targetZones: [1], prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
-  { title: "Mid Intensity Weight Loss", targetZones: [2], prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant" },
-  { title: "General Weight Loss", targetZones: [1, 2], prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods" },
-  { title: "Strength Training", targetZones: [2, 3], prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods" },
-  { title: "High Intensity", targetZones: [3, 4], prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute" }
+  { 
+    title: "Wellness", 
+    targetZones: [0], 
+    prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target",
+    transitionStrategy: "fixed state - MAIN_ACTIVE" 
+  },
+  { 
+    title: "Low Intensity Weight Loss", 
+    targetZones: [1], 
+    prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant",
+    transitionStrategy: "normal state"
+  },
+  { 
+    title: "Mid Intensity Weight Loss", 
+    targetZones: [2], 
+    prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant",
+    transitionStrategy: "normal state"
+  },
+  { 
+    title: "General Weight Loss", 
+    targetZones: [1, 2], 
+    prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods",
+    transitionStrategy: "normal state"
+  },
+  { 
+    title: "Strength Training", 
+    targetZones: [2, 3], 
+    prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods",
+    transitionStrategy: "fixed state - MAIN_ACTIVE"
+  },
+  { 
+    title: "High Intensity", 
+    targetZones: [3, 4], 
+    prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute",
+    transitionStrategy: "fixed state - MAIN_ACTIVE"
+  }
 ];
 
 const VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
@@ -113,7 +155,7 @@ Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
 Goal Customization: Your feedback MUST be focused on the user's specific objective: {{GOAL}}.
-Context Usage: You will receive an [OBJECTIVE STATUS TRACKER]. This is purely contextual input for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
+Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change.
 4-6: Notable trend shift or minor zone boundary approach.
@@ -153,6 +195,7 @@ const App: React.FC = () => {
 
   // --- Session & Timer State ---
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [currentSessionState, setCurrentSessionState] = useState<SessionState>(SessionState.IDLE);
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState("00:00:00");
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -175,16 +218,37 @@ const App: React.FC = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
   const sessionActiveRef = useRef(isSessionActive); // Mirror for WS callback
+  const currentSessionStateRef = useRef(currentSessionState);
+  
+  // Objective Time Ref (Only increments in performance states)
+  const performanceDurationRef = useRef(0);
+  const lastPerformanceTickRef = useRef<number>(0);
   
   // Session Metrics Refs
-  const runningMetricsRef = useRef<{ heartPoints: number; calories: number; compliantMinutes: number }>({ heartPoints: 0, calories: 0, compliantMinutes: 0 });
+  const runningMetricsRef = useRef<{ heartPoints: number; calories: number; compliantMinutes: number; performanceMinutes: number }>({ heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 });
+  
+  // Hysteresis Refs
+  const transitionTimersRef = useRef<{ 
+      warmupToMain: number | null; 
+      mainToPause: number | null;
+      pauseToMain: number | null;
+      bonusToRecovery: number | null; 
+  }>({ 
+      warmupToMain: null, 
+      mainToPause: null,
+      pauseToMain: null,
+      bonusToRecovery: null 
+  });
+
+  // State Tracking Refs (Frame-based)
+  const sessionStatesInFrameRef = useRef<Set<SessionState>>(new Set());
 
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
-  const sessionIntroRef = useRef<{ prompt: string; text: string } | null>(null);
-  const missionProfileRef = useRef<{ prompt: string; text: string } | null>(null);
-  const currentSessionContextRef = useRef<string>(""); // Mid-term memory storage
-  const finalSessionReportRef = useRef<{ prompt: string; text: string } | null>(null); // Final report storage
+  const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
+  const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
+  const currentSessionContextRef = useRef<SessionContext | null>(null); // Mid-term memory storage
+  const finalSessionReportRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null); // Final report storage
   
   // Audio Context & Queue Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -195,6 +259,14 @@ const App: React.FC = () => {
 
   // Sync ref
   useEffect(() => { sessionActiveRef.current = isSessionActive; }, [isSessionActive]);
+  useEffect(() => { currentSessionStateRef.current = currentSessionState; }, [currentSessionState]);
+
+  // Frame State Tracking Effect
+  useEffect(() => {
+    if (isSessionActive) {
+      sessionStatesInFrameRef.current.add(currentSessionState);
+    }
+  }, [currentSessionState, isSessionActive]);
 
   const zones: ZoneConfig[] = useMemo(() => {
     const maxHR = 220 - age;
@@ -223,6 +295,166 @@ const App: React.FC = () => {
     };
   }, [currentHR, zones]);
 
+  // --- State Machine Logic ---
+  const updateSessionState = useCallback((currentBPM: number | null) => {
+      // 1. Connection/System Level Errors override everything
+      if (status === ConnectionStatus.ERROR) {
+          setCurrentSessionState(SessionState.ERROR);
+          return;
+      }
+
+      // 2. Idle check
+      if (!isSessionActive) {
+          setCurrentSessionState(SessionState.IDLE);
+          return;
+      }
+
+      // 3. Initialize Strategy
+      const strategy = (currentObjective as any).transitionStrategy || "normal state";
+      const isFixed = strategy.startsWith("fixed state");
+      
+      // 4. Initialization Phase
+      // If we don't have a mission profile yet, we are technically in INIT
+      if (!missionProfileRef.current) {
+          setCurrentSessionState(SessionState.INIT);
+          return;
+      }
+
+      // 5. Fixed Strategy Logic
+      if (isFixed) {
+          // Parse target state, defaulting to MAIN_ACTIVE
+          let targetState = SessionState.MAIN_ACTIVE;
+          if (strategy.includes("MAIN_ACTIVE")) targetState = SessionState.MAIN_ACTIVE;
+          // Could add more parsing if other fixed states exist, but requirements say mostly MAIN_ACTIVE.
+          
+          // Brief buffer to allow INIT to resolve visually
+          if (sessionStartTime && (Date.now() - sessionStartTime) < 5000) {
+              setCurrentSessionState(SessionState.INIT);
+          } else {
+              setCurrentSessionState(targetState);
+          }
+          return;
+      }
+
+      // 6. Normal Strategy Logic
+      // Calculations
+      const now = Date.now();
+      const elapsedMs = now - (sessionStartTime || now);
+      const elapsedMinutes = elapsedMs / 60000;
+      
+      // Determine Target Minimum BPM based on Objective
+      // Using zones array and targetZones indices from objective
+      let targetMinBPM = 999;
+      if (currentObjective.targetZones.length > 0) {
+          const minZoneIdx = Math.min(...currentObjective.targetZones);
+          if (zones[minZoneIdx]) {
+              targetMinBPM = zones[minZoneIdx].min;
+          }
+      } else {
+          // Fallback if no specific zones (e.g. Wellness zone 0-1)
+          targetMinBPM = zones[1].min; // Zone 2 start
+      }
+
+      // GOAL CHECK
+      // Modified: Only Time determines "Goals Met" state transition for now.
+      const goalsMet = elapsedMinutes >= sessionDurationGoal;
+
+      if (!goalsMet) {
+          // --- Main Workout Phase (Goals Not Met Yet) ---
+          
+          if (currentSessionState === SessionState.WARMUP || currentSessionState === SessionState.INIT) {
+              // Transition Trigger: Time > 2.0 OR HR >= TargetMin
+              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+
+              if (isWarmupComplete) {
+                   // Start Debounce
+                   if (!transitionTimersRef.current.warmupToMain) {
+                       transitionTimersRef.current.warmupToMain = now;
+                   } else if (now - transitionTimersRef.current.warmupToMain > 5000) {
+                       // Confirm Transition
+                       setCurrentSessionState(SessionState.MAIN_ACTIVE);
+                       transitionTimersRef.current.warmupToMain = null;
+                   }
+              } else {
+                   // Conditions lost (e.g. HR dropped back down before 2 mins)
+                   transitionTimersRef.current.warmupToMain = null;
+                   // Ensure we stay in WARMUP unless we are INIT
+                   if (currentSessionState !== SessionState.WARMUP && currentSessionState !== SessionState.INIT) {
+                       setCurrentSessionState(SessionState.WARMUP);
+                   } else if (currentSessionState === SessionState.INIT && elapsedMinutes > 0.1) {
+                       // Move INIT to WARMUP quickly
+                       setCurrentSessionState(SessionState.WARMUP);
+                   }
+              }
+          }
+          else if (currentSessionState === SessionState.MAIN_ACTIVE) {
+              // Check for Drop to PAUSE
+              // Higher values (>= TargetMin) are compliant. Lower values (< TargetMin) trigger Pause.
+              const isDrop = (currentBPM || 0) < targetMinBPM;
+              
+              if (isDrop) {
+                  if (!transitionTimersRef.current.mainToPause) {
+                      transitionTimersRef.current.mainToPause = now;
+                  } else if (now - transitionTimersRef.current.mainToPause > 30000) { // Changed to 30s
+                      setCurrentSessionState(SessionState.PAUSE);
+                      transitionTimersRef.current.mainToPause = null;
+                  }
+              } else {
+                  transitionTimersRef.current.mainToPause = null;
+              }
+          }
+          else if (currentSessionState === SessionState.PAUSE) {
+              // Check for Return to MAIN_ACTIVE
+              const isRecovery = (currentBPM || 0) >= targetMinBPM;
+
+              if (isRecovery) {
+                  if (!transitionTimersRef.current.pauseToMain) {
+                      transitionTimersRef.current.pauseToMain = now;
+                  } else if (now - transitionTimersRef.current.pauseToMain > 5000) {
+                      setCurrentSessionState(SessionState.MAIN_ACTIVE);
+                      transitionTimersRef.current.pauseToMain = null;
+                  }
+              } else {
+                  transitionTimersRef.current.pauseToMain = null;
+              }
+          }
+
+      } else {
+          // --- Goals Met Phase (Post-Workout / Bonus) ---
+          
+          const isRecoveryCondition = (currentBPM || 0) < targetMinBPM;
+
+          if (currentSessionState === SessionState.BONUS_ACTIVE || currentSessionState === SessionState.MAIN_ACTIVE || currentSessionState === SessionState.PAUSE) {
+              if (isRecoveryCondition) {
+                  // Candidate for RECOVERY. Check Hysteresis.
+                  if (!transitionTimersRef.current.bonusToRecovery) {
+                      transitionTimersRef.current.bonusToRecovery = now;
+                  } else if (now - transitionTimersRef.current.bonusToRecovery > 5000) {
+                      setCurrentSessionState(SessionState.RECOVERY);
+                      transitionTimersRef.current.bonusToRecovery = null;
+                  }
+              } else {
+                  // Staying Active/Bonus
+                  transitionTimersRef.current.bonusToRecovery = null;
+                  if (currentSessionState !== SessionState.BONUS_ACTIVE) setCurrentSessionState(SessionState.BONUS_ACTIVE);
+              }
+          } else {
+               // Currently RECOVERY
+               if (!isRecoveryCondition) {
+                   // Instant jump to BONUS_ACTIVE
+                   setCurrentSessionState(SessionState.BONUS_ACTIVE);
+                   transitionTimersRef.current.bonusToRecovery = null;
+               } else {
+                   // Staying Recovery
+                   transitionTimersRef.current.bonusToRecovery = null;
+                   if (currentSessionState !== SessionState.RECOVERY) setCurrentSessionState(SessionState.RECOVERY);
+               }
+          }
+      }
+
+  }, [isSessionActive, status, currentObjective, sessionStartTime, zones, activeTargetView, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, currentSessionState]);
+
+
   const addLog = useCallback((message: string) => {
     setLogs((prev) => {
       const now = new Date();
@@ -233,7 +465,27 @@ const App: React.FC = () => {
     });
   }, []);
 
-  // Timer Effect
+  // Performance Duration Timer
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isSessionActive) {
+        lastPerformanceTickRef.current = Date.now();
+        interval = setInterval(() => {
+            const now = Date.now();
+            const delta = now - lastPerformanceTickRef.current;
+            lastPerformanceTickRef.current = now;
+            
+            // Only increment active performance time if in valid states (MAIN_ACTIVE, BONUS_ACTIVE)
+            // Explicitly exclude WARMUP, RECOVERY, PAUSE, INIT from the "Goal Timer"
+            if (currentSessionState === SessionState.MAIN_ACTIVE || currentSessionState === SessionState.BONUS_ACTIVE) {
+                performanceDurationRef.current += delta;
+            }
+        }, 100); 
+    }
+    return () => clearInterval(interval);
+  }, [isSessionActive, currentSessionState]);
+
+  // Wall Clock Timer Effect
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     if (isSessionActive && sessionStartTime) {
@@ -252,10 +504,13 @@ const App: React.FC = () => {
     const hh = String(now.getHours()).padStart(2, '0');
     const min = String(now.getMinutes()).padStart(2, '0');
 
-    // Calculate Final Metric Totals
-    const totalPoints = allSessionSummariesRef.current.reduce((acc, curr) => acc + curr.heartPoints, 0);
-    const totalCalories = allSessionSummariesRef.current.reduce((acc, curr) => acc + curr.calories, 0);
-    const totalMinutes = allSessionSummariesRef.current.length;
+    // Calculate Final Metric Totals - Using Running Metrics (Gated) instead of raw sum
+    const totalPoints = runningMetricsRef.current.heartPoints;
+    const totalCalories = runningMetricsRef.current.calories;
+    // For compliance calculation in log, use active performance minutes as denominator
+    const performanceMinutes = runningMetricsRef.current.performanceMinutes;
+    // Total duration is all buckets
+    const totalDurationMinutes = allSessionSummariesRef.current.length;
     
     // Construct relevant objective line
     let activeObjectiveStr = "";
@@ -275,10 +530,11 @@ const App: React.FC = () => {
     contentDebug += `Subject Weight: ${weight} lbs\n`;
     contentDebug += `Subject Gender: ${gender}\n`;
     contentDebug += `Training Goal: ${currentObjective.title}\n`;
+    contentDebug += `Strategy: ${(currentObjective as any).transitionStrategy}\n`;
     contentDebug += `OBJECTIVES: ${activeObjectiveStr}\n`;
     contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
     contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
-    contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
+    contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
     contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
@@ -287,6 +543,10 @@ const App: React.FC = () => {
     
     if (finalSessionReportRef.current) {
         contentDebug += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
+        if (finalSessionReportRef.current.tokenUsage) {
+            const u = finalSessionReportRef.current.tokenUsage;
+            contentDebug += `[Tokens: In ${u.input} / Out ${u.output} / Tot ${u.total}]\n`;
+        }
     }
 
     contentDebug += `--------------------------------------------------\n\n`;
@@ -295,6 +555,10 @@ const App: React.FC = () => {
         contentDebug += `[MISSION PROFILE]\n`;
         contentDebug += `Prompt: ${missionProfileRef.current.prompt}\n`;
         contentDebug += `Response: ${missionProfileRef.current.text}\n`;
+        if (missionProfileRef.current.tokenUsage) {
+            const u = missionProfileRef.current.tokenUsage;
+            contentDebug += `[Tokens: In ${u.input} / Out ${u.output} / Tot ${u.total}]\n`;
+        }
         contentDebug += `--------------------------------------------------\n\n`;
     }
 
@@ -302,6 +566,10 @@ const App: React.FC = () => {
         contentDebug += `[SESSION INTRO]\n`;
         contentDebug += `Prompt: ${sessionIntroRef.current.prompt}\n`;
         contentDebug += `Response: ${sessionIntroRef.current.text}\n`;
+        if (sessionIntroRef.current.tokenUsage) {
+            const u = sessionIntroRef.current.tokenUsage;
+            contentDebug += `[Tokens: In ${u.input} / Out ${u.output} / Tot ${u.total}]\n`;
+        }
         contentDebug += `--------------------------------------------------\n\n`;
     }
   
@@ -310,13 +578,22 @@ const App: React.FC = () => {
     } else {
       allSessionSummariesRef.current.forEach((s, index) => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
+        contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
         if (s.sessionContextSummary) {
-            contentDebug += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary}\n`;
+            contentDebug += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary.text}\n`;
+            contentDebug += `     [Context Prompt]: \n${s.sessionContextSummary.prompt}\n`;
+            if (s.sessionContextSummary.tokenUsage) {
+               const u = s.sessionContextSummary.tokenUsage;
+               contentDebug += `     [Context Tokens]: In ${u.input} / Out ${u.output} / Tot ${u.total}\n`;
+            }
         }
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
+        if (s.tokenUsage) {
+            contentDebug += `   > TOKENS     : In ${s.tokenUsage.input} | Out ${s.tokenUsage.output} | Tot ${s.tokenUsage.total}\n`;
+        }
         contentDebug += `   > RAW VALUES : [${s.values.join(',')}]\n`;
         contentDebug += `\n`;
       });
@@ -339,7 +616,7 @@ const App: React.FC = () => {
     contentUser += `Objectives: ${activeObjectiveStr}\n`;
     contentUser += `Total Calories: ${totalCalories.toFixed(1)} kcal\n`;
     contentUser += `Total Heart Points: ${totalPoints}\n`;
-    contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes\n`;
+    contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} active minutes\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
 
@@ -353,6 +630,7 @@ const App: React.FC = () => {
         allSessionSummariesRef.current.forEach((s, index) => {
             contentUser += `Minute ${index + 1} (${s.timestamp}): Avg ${s.avg} BPM | Max ${s.max} BPM\n`;
             contentUser += `Metrics: ${s.calories.toFixed(1)} kcal, ${s.heartPoints} HP\n`;
+            contentUser += `State: ${s.sessionState}\n`;
             contentUser += `Coach: "${s.insight || "N/A"}"\n\n`;
         });
     }
@@ -452,6 +730,12 @@ const App: React.FC = () => {
             },
           },
         });
+        
+        // Log token usage for TTS if available
+        const tokenUsage = extractUsage(response);
+        if (tokenUsage) {
+            addLog(`VOICE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+        }
 
         const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
         if (!base64Audio) {
@@ -518,6 +802,7 @@ const App: React.FC = () => {
     const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
 Selected Strategy: ${currentObjective.title}
 ${targetContext}
+Current Session State: ${currentSessionState}
 Contextual Instructions: "${currentObjective.prompt}"
 
 Requirements:
@@ -539,13 +824,16 @@ Output Style: concise, structured, and directive. This profile will serve as the
             contents: prompt,
         });
         
+        const tokenUsage = extractUsage(response);
         const profileText = response.text || "Mission profile generation failed. Using default heuristic.";
-        missionProfileRef.current = { prompt, text: profileText };
+        missionProfileRef.current = { prompt, text: profileText, tokenUsage };
         addLog(`[MISSION_PROFILE] ${profileText}`);
+        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog]);
+  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog, currentSessionState]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
@@ -584,11 +872,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
         contents: prompt,
       });
 
+      const tokenUsage = extractUsage(response);
       const introText = response.text || "Session initialized. AetherAegis monitoring active.";
       addLog(`AI_INTRO: "${introText}"`);
+      if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
       
       // Store in ref for file log
-      sessionIntroRef.current = { prompt, text: introText };
+      sessionIntroRef.current = { prompt, text: introText, tokenUsage };
       setIntroText(introText);
       
       if (isVoiceEnabled) {
@@ -623,15 +913,20 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     try {
         addLog(`AI_REQUEST: Updating Mid-Term Memory Context...`);
+        addLog(`[DEBUG_MID_TERM_PROMPT] ${prompt}`); 
+
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: prompt,
         });
         
+        const tokenUsage = extractUsage(response);
         const summaryText = response.text || "Trends processing...";
-        currentSessionContextRef.current = summaryText;
+        currentSessionContextRef.current = { text: summaryText, prompt, tokenUsage };
+        
         addLog(`[MID_TERM_MEMORY] ${summaryText}`);
+        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
     } catch (e) {
         addLog(`AI_WARN: Failed to update session context.`);
     }
@@ -643,15 +938,18 @@ Output Style: concise, structured, and directive. This profile will serve as the
     if (summaries.length === 0) return;
 
     const lastSummary = summaries[summaries.length - 1];
-    const midTermContext = currentSessionContextRef.current;
+    const midTermContext = currentSessionContextRef.current ? currentSessionContextRef.current.text : "N/A";
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     
     // Calculate simple stats for prompt
     const avgHr = Math.round(summaries.reduce((a,b)=>a+b.avg,0)/summaries.length);
     const peakHr = Math.max(...summaries.map(s => s.max));
-    const totalCalories = summaries.reduce((acc, curr) => acc + curr.calories, 0);
-    const totalPoints = summaries.reduce((acc, curr) => acc + curr.heartPoints, 0);
-    const totalMinutes = summaries.length;
+    // Use filtered totals from ref to ensure final report matches "no-penalty" logic
+    const totalCalories = runningMetricsRef.current.calories;
+    const totalPoints = runningMetricsRef.current.heartPoints;
+    
+    // Use Performance Minutes for Compliance, not Total Wall Clock Minutes
+    const performanceMinutes = runningMetricsRef.current.performanceMinutes;
 
     const prompt = `
     Persona: ${personaIdentity}
@@ -660,8 +958,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
     
     Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM, Calories ${totalCalories.toFixed(0)}, Heart Points ${totalPoints}.
-    Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes matching target zones.
-    Mid-Term Trend: ${midTermContext || "N/A"}
+    Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
+    Mid-Term Trend: ${midTermContext}
     Last Minute Insight: ${lastSummary.insight || "N/A"}
     `;
 
@@ -675,10 +973,12 @@ Output Style: concise, structured, and directive. This profile will serve as the
             contents: prompt,
         });
         
+        const tokenUsage = extractUsage(response);
         const reportText = response.text || "Session concluded. Data saved.";
-        finalSessionReportRef.current = { prompt, text: reportText };
+        finalSessionReportRef.current = { prompt, text: reportText, tokenUsage };
         setFinalReportText(reportText); // Update State for UI
         addLog(`[FINAL_REPORT] ${reportText}`);
+        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 
         // Trigger TTS for final report if voice is enabled
         if (isVoiceEnabled) {
@@ -733,28 +1033,30 @@ Output Style: concise, structured, and directive. This profile will serve as the
     // --- MID-TERM MEMORY INJECTION ---
     let memoryContext = "";
     if (currentSessionContextRef.current) {
-        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n`;
+        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current.text}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n`;
     }
     
     // --- REAL-TIME OBJECTIVE STATUS INJECTION ---
-    // Calculate estimated elapsed time in minutes for display context
-    const currentElapsedTimeMinutes = ((Date.now() - (sessionStartTime || Date.now())) / 60000).toFixed(1);
+    // Calculate performance time in minutes for display context (Ignoring warmup/recovery)
+    const currentPerformanceMinutes = (performanceDurationRef.current / 60000).toFixed(1);
     
     let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n`;
     if (activeTargetView === 'Time') {
-        objectiveStatus += `- Time: ${currentElapsedTimeMinutes} / ${sessionDurationGoal} mins`;
+        objectiveStatus += `- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
     } else if (activeTargetView === 'HeartPoints') {
         objectiveStatus += `- Heart Points: ${runningMetricsRef.current.heartPoints} / ${sessionHeartPointsGoal}`;
     } else if (activeTargetView === 'Calories') {
         objectiveStatus += `- Calories: ${runningMetricsRef.current.calories.toFixed(0)} / ${sessionCaloriesGoal} kcal`;
     }
     
-    const totalMinutes = allSessionSummariesRef.current.length;
-    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalMinutes} minutes in target zone`;
+    // Total Denominator for compliance should only include performance-active minutes
+    const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
+    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalPerformanceMinutes} performance minutes in target zone`;
     objectiveStatus += `\n(System Context: Use the following metrics as the factual foundation for your observations. Translate these values into your persona's voice—focus on the 'State of the Mission' rather than the raw digits. Do not replicate the list format; simply internalize the data to inform your judgment.)`;
     
     // Append objective status to the memory context block (or create if empty)
-    memoryContext += `\n${objectiveStatus}\n\n`;
+    memoryContext += `\n${objectiveStatus}\n`;
+    memoryContext += `[CURRENT SESSION STATE]: ${summary.sessionState}\n\n`; // Use the frame-based session state
 
 
     const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
@@ -769,21 +1071,34 @@ Output Style: concise, structured, and directive. This profile will serve as the
         contents: prompt,
       });
 
+      const tokenUsage = extractUsage(response);
       const insight = response.text || "Insight unavailable.";
       addLog(`AI_RESPONSE: Analysis complete.`);
       addLog(`AI_INSIGHT: "${insight}"`);
+      if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 
       // Update the log history ref with the new insight and prompt
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
-        allSessionSummariesRef.current[logIndex].sessionContextSummary = currentSessionContextRef.current; // Store memory context
+        // Store structured memory context snapshot
+        if (currentSessionContextRef.current) {
+            allSessionSummariesRef.current[logIndex].sessionContextSummary = currentSessionContextRef.current; 
+        }
+        allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage; // Store token usage
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
       }
 
       setSummaries(prev => prev.map(s => 
-        s.id === summary.id ? { ...s, insight, isAnalyzing: false, prompt, sessionContextSummary: currentSessionContextRef.current } : s
+        s.id === summary.id ? { 
+            ...s, 
+            insight, 
+            isAnalyzing: false, 
+            prompt, 
+            sessionContextSummary: currentSessionContextRef.current || undefined, 
+            tokenUsage 
+        } : s
       ));
 
       // Extract Saliency Score from Insight Text for logic processing
@@ -825,6 +1140,29 @@ Output Style: concise, structured, and directive. This profile will serve as the
     if (values.length === 0) return;
     
     const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // --- FRAME STATE CALCULATION ---
+    // Prioritize states encountered during the frame based on: WARMUP > RECOVERY > ERROR > PAUSE > MAIN_ACTIVE
+    const observedStates = sessionStatesInFrameRef.current;
+    let effectiveFrameState = currentSessionState;
+
+    if (observedStates.has(SessionState.WARMUP)) {
+        effectiveFrameState = SessionState.WARMUP;
+    } else if (observedStates.has(SessionState.RECOVERY)) {
+        effectiveFrameState = SessionState.RECOVERY;
+    } else if (observedStates.has(SessionState.ERROR)) {
+        effectiveFrameState = SessionState.ERROR;
+    } else if (observedStates.has(SessionState.PAUSE)) {
+        effectiveFrameState = SessionState.PAUSE;
+    } else if (observedStates.has(SessionState.MAIN_ACTIVE)) {
+        effectiveFrameState = SessionState.MAIN_ACTIVE;
+    }
+    // Else fall back to current state (likely BONUS_ACTIVE or INIT)
+    
+    // Reset frame state tracker for the next minute, but seed it with the current state
+    sessionStatesInFrameRef.current.clear();
+    sessionStatesInFrameRef.current.add(currentSessionState);
+
     const avgHr = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
     const maxVal = Math.max(...values);
     const minVal = Math.min(...values);
@@ -863,10 +1201,19 @@ Output Style: concise, structured, and directive. This profile will serve as the
     }
     calories = Math.max(0, calories); // Prevent negative calories
 
-    // Update Session Running Totals
+    // --- METRIC ACCUMULATION GATE ---
+    // Always increment metabolic metrics to avoid "penalizing" the user
     runningMetricsRef.current.heartPoints += points;
     runningMetricsRef.current.calories += calories;
-    if (isCompliant) runningMetricsRef.current.compliantMinutes += 1;
+    
+    // Only increment Compliance Denominator if in active performance states
+    // This allows WARMUP and RECOVERY to be ignored for percentage calculation
+    const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || effectiveFrameState === SessionState.BONUS_ACTIVE;
+    
+    if (isPerformanceState) {
+        runningMetricsRef.current.performanceMinutes += 1; // Increment denominator for active minutes
+        if (isCompliant) runningMetricsRef.current.compliantMinutes += 1;
+    }
 
     const newSummary: MinuteSummary = {
       id: crypto.randomUUID(),
@@ -878,7 +1225,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
       values,
       isAnalyzing: true,
       heartPoints: points,
-      calories: calories
+      calories: calories,
+      sessionState: effectiveFrameState // Use calculated frame state
     };
 
     // Store in full session log history
@@ -886,7 +1234,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
-    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'}`);
+    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'} | Gated: ${!isPerformanceState}`);
+    addLog(`STATE_FRAME: ${effectiveFrameState} (Current: ${currentSessionState})`);
     
     // Trigger standard analysis
     requestAiInsight(newSummary);
@@ -896,13 +1245,18 @@ Output Style: concise, structured, and directive. This profile will serve as the
         generateSessionSummary();
     }
 
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective]);
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective, currentSessionState]);
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
   
   const showRawTelemetryRef = useRef(showRawTelemetry);
   useEffect(() => { showRawTelemetryRef.current = showRawTelemetry; }, [showRawTelemetry]);
+
+  // Expose updated state machine to message loop
+  const updateStateRef = useRef(updateSessionState);
+  useEffect(() => { updateStateRef.current = updateSessionState; }, [updateSessionState]);
+
 
   const connect = useCallback(() => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
@@ -931,25 +1285,33 @@ Output Style: concise, structured, and directive. This profile will serve as the
           
           if (!isNaN(numericHR) && numericHR >= HR_MIN_VALID && numericHR <= HR_MAX_VALID) {
             
-            // LOGIC: AI triggers only if session is active AND we hit the time delta
-            let isAiTrigger = false;
-            
-            if (sessionActiveRef.current) {
-                const now = Date.now();
-                if (now >= nextSummaryTimeRef.current) {
-                    isAiTrigger = true;
-                    // Increment target time by exactly 60000ms from the previous target
-                    // This prevents drift caused by code execution time
-                    nextSummaryTimeRef.current += 60000;
-                }
+            // Update State Machine continuously based on new data
+            if (updateStateRef.current) {
+                updateStateRef.current(numericHR);
             }
 
+            const currentState = currentSessionStateRef.current;
             const newData: HeartRateData = {
               hr: numericHR,
               timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              isAiRequest: isAiTrigger
+              isAiRequest: false
             };
             
+            // AI SYNC TRIGGER LOGIC
+            let isAiTrigger = false;
+            if (sessionActiveRef.current) {
+                currentMinuteRef.current.push(numericHR);
+                
+                // Check wall clock time against next summary target
+                const now = Date.now();
+                if (now >= nextSummaryTimeRef.current) {
+                    isAiTrigger = true;
+                    newData.isAiRequest = true; // Mark point on chart
+                    calcRef.current(); // Generate summary
+                    nextSummaryTimeRef.current += 60000; // Advance target
+                }
+            }
+
             if (showRawTelemetryRef.current) {
               addLog(`TELEMETRY: ${numericHR} BPM ${isAiTrigger ? '[AI_SYNC]' : ''} | RAW: ${rawMsg}`);
             }
@@ -959,14 +1321,6 @@ Output Style: concise, structured, and directive. This profile will serve as the
               const updated = [...prev, newData];
               return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
             });
-            
-            // Only accumulate data if session is active
-            if (sessionActiveRef.current) {
-                currentMinuteRef.current.push(numericHR);
-                if (isAiTrigger) {
-                  calcRef.current(); 
-                }
-            }
 
           } else if (numericHR !== undefined && numericHR !== null) {
             addLog(`WARNING: Biometric Noise Filtered [${numericHR} BPM]`);
@@ -1031,13 +1385,16 @@ Output Style: concise, structured, and directive. This profile will serve as the
     allSessionSummariesRef.current = [];
     sessionIntroRef.current = null; // Clear intro ref on restart
     missionProfileRef.current = null; // Clear mission profile
-    currentSessionContextRef.current = ""; // Clear memory ref
+    currentSessionContextRef.current = null; // Clear memory ref
     finalSessionReportRef.current = null; // Clear final report
     setFinalReportText(null); // Clear UI report
     setSummaries([]);
     setIsSessionActive(false);
+    setCurrentSessionState(SessionState.IDLE);
+    transitionTimersRef.current = { warmupToMain: null, bonusToRecovery: null, mainToPause: null, pauseToMain: null };
     setIntroText(null);
     setElapsedTime("00:00:00");
+    performanceDurationRef.current = 0; // Reset Performance Duration
     setTimeout(connect, 300);
   }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
 
@@ -1053,6 +1410,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
       // We keep the elapsed time display visible, but stop updating it
       addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
       setSessionStartTime(null);
+      setCurrentSessionState(SessionState.IDLE);
       
       // Generate Final Report before downloading
       await generateFinalSessionReport(elapsedTime);
@@ -1083,18 +1441,21 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
       const now = Date.now();
       setIsSessionActive(true);
+      setCurrentSessionState(SessionState.INIT);
       setSessionStartTime(now);
       setElapsedTime("00:00:00");
       currentMinuteRef.current = []; // Clear buffer
       allSessionSummariesRef.current = []; // Clear session history
-      runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0 }; // Reset metrics
-      sessionIntroRef.current = null; // Clear old intro
-      missionProfileRef.current = null; // Clear old profile
-      currentSessionContextRef.current = ""; // Clear old memory
-      finalSessionReportRef.current = null; // Clear old final report
-      setFinalReportText(null); // Clear UI report
+      runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 }; // Reset metrics
+      performanceDurationRef.current = 0; // Reset performance duration
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
       setIntroText(null);
+      transitionTimersRef.current = { warmupToMain: null, bonusToRecovery: null, mainToPause: null, pauseToMain: null };
+      
+      // Reset Frame Tracking
+      sessionStatesInFrameRef.current.clear();
+      sessionStatesInFrameRef.current.add(SessionState.INIT);
+
       addLog("SESSION: Workout started. Timer active.");
 
       // Trigger Start-of-Session AI Tasks
@@ -1263,6 +1624,15 @@ Output Style: concise, structured, and directive. This profile will serve as the
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Status</label>
                 <StatusBadge status={status} sessionActive={isSessionActive} />
+              </div>
+
+              <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session State</label>
+                <div className="px-3 py-1.5 border border-purple-500/30 bg-purple-500/10 rounded-sm">
+                   <span className="text-[10px] font-black uppercase tracking-tighter text-purple-400">{currentSessionState}</span>
+                </div>
               </div>
               
               <div className="flex gap-2 ml-auto lg:ml-0">
