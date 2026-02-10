@@ -66,7 +66,7 @@
         *   Compliance: X/Y **Performance Minutes**
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, and Mission Profile) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
-*   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Aether-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
+*   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Ginger-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
 *   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext.
     *   **Retry Logic**: The system must attempt one retry on synthesis failure.
     *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately to prevent API throttling.
