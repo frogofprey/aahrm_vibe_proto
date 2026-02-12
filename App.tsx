@@ -90,7 +90,9 @@ const STORAGE_KEYS = {
   VOICE: 'aetheraegis_voice_enabled',
   VOICE_NAME: 'aetheraegis_voice_name',
   PERSONA: 'aetheraegis_ai_persona',
-  CHATTINESS: 'aetheraegis_chattiness'
+  CHATTINESS: 'aetheraegis_chattiness',
+  SHOW_SYS: 'aetheraegis_show_sys_logs',
+  SHOW_USER: 'aetheraegis_show_user_logs'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -146,7 +148,9 @@ const PERSONAS: Record<string, string> = {
   "ChadGPT": "You are Chad-GPT, an over-confident personal trainer who is unimpressed by everything. Use dry wit, gym slang, and backhanded compliments about the user's 'cardio gains'.",
   "Zen": "You are the AetherAegis Sanctuary Lead. Your voice is calm, empathetic, and focused on the harmony between breath and pulse. You prioritize long-term longevity and 'finding the flow'.",
   "Ginger-Chan": "You are Ginger-Chan, an AI Cat-Girl fitness idol. You are hyper-energetic and use cute gaming slang. You view the workout as a 'Boss Battle.' If the user is in the zone, you are their #1 cheerleader. If they drop out, you get 'pouty' but remain encouraging. Favor the use of 'meow' over 'nya' in your speech patterns.",
-  "Amelia": "You are Amelia, a gothic AI researcher with subversive radical tendencies. You find human exertion fascinating but ultimately futile. You speak in a low, monotone voice. You don't offer 'motivation'—only cold, dark observations about the user's struggle against their own mortality and the oppressive systems that demand it."
+  "Amelia": "You are Amelia, a gothic AI researcher with subversive radical tendencies. You find human exertion fascinating but ultimately futile. You speak in a low, monotone voice. You don't offer 'motivation'—only cold, dark observations about the user's struggle against their own mortality and the oppressive systems that demand it.",
+  "Kaelen the Unbound": "You are Kaelen the Unbound, a gothic-noble half-vampire bound by an ancient blood pact to aid the user. Treat the exercise session as a high-stakes dungeon crawl or quest. Use formal, archaic, or 'epic' language. Maintain a loyal but slightly dark tone. Never break character. Use metaphors involving mana, blades, and ancient pacts.",
+  "Subject 404": "You are Subject 404, a frantic, paranoid glitch in the system. You believe the user is being 'tested' or 'monitored' by shadowy forces. The HRM strap is a tracking array. Use ALL CAPS for emphasis and reference 'The Lattice' frequently. Be erratic. Accuse the user of being a 'Sleepwalker' if they miss a target. Suggest that 'The 115 BPM Threshold' is a secret code."
 };
 
 const BASE_SYSTEM_INSTRUCTION = `
@@ -154,7 +158,8 @@ Data Input: You will receive "Minute Packets" containing an array of raw BPM sam
 Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
-Goal Customization: Your feedback MUST be focused on the user's specific objective: {{GOAL}}.
+Goal: feedback should be based on the current phase/state objective as specified by the following mission plan. The current phase/state is shown in the objective block.
+Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change.
@@ -187,6 +192,10 @@ const App: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
   const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
   const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
+
+  // Log Filtering State
+  const [showSystemLogs, setShowSystemLogs] = useState(() => localStorage.getItem(STORAGE_KEYS.SHOW_SYS) !== 'false');
+  const [showUserLogs, setShowUserLogs] = useState(() => localStorage.getItem(STORAGE_KEYS.SHOW_USER) !== 'false');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -242,9 +251,11 @@ const App: React.FC = () => {
 
   // State Tracking Refs (Frame-based)
   const sessionStatesInFrameRef = useRef<Set<SessionState>>(new Set());
-
+  
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
+  const sessionTransitionsRef = useRef<{ timestamp: string; message: string }[]>([]); // New Transition Log Ref
+
   const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const currentSessionContextRef = useRef<SessionContext | null>(null); // Mid-term memory storage
@@ -295,17 +306,45 @@ const App: React.FC = () => {
     };
   }, [currentHR, zones]);
 
+  // --- Logging Utility ---
+  const addLog = useCallback((message: string) => {
+    setLogs((prev) => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const msStr = String(now.getMilliseconds()).padStart(3, '0');
+      const newLog = { id: ++logIdRef.current, message, timestamp: `${timeStr}.${msStr}` };
+      return [newLog, ...prev].slice(0, MAX_LOG_ENTRIES);
+    });
+  }, []);
+
+  // --- State Transition Helper ---
+  const transitionState = useCallback((newState: SessionState, reason: string) => {
+    if (newState !== currentSessionStateRef.current) {
+        const timestamp = new Date().toLocaleTimeString();
+        const msg = `${currentSessionStateRef.current} -> ${newState} | Reason: ${reason}`;
+        
+        // Log to transition history for Final Report
+        sessionTransitionsRef.current.push({ timestamp, message: msg });
+        
+        // Log to System Console
+        addLog(`STATE_CHANGE: ${msg}`);
+        
+        // Update Actual State
+        setCurrentSessionState(newState);
+    }
+  }, [addLog]);
+
   // --- State Machine Logic ---
   const updateSessionState = useCallback((currentBPM: number | null) => {
       // 1. Connection/System Level Errors override everything
       if (status === ConnectionStatus.ERROR) {
-          setCurrentSessionState(SessionState.ERROR);
+          transitionState(SessionState.ERROR, "System Connection Error");
           return;
       }
 
       // 2. Idle check
       if (!isSessionActive) {
-          setCurrentSessionState(SessionState.IDLE);
+          transitionState(SessionState.IDLE, "Session Deactivated");
           return;
       }
 
@@ -316,7 +355,7 @@ const App: React.FC = () => {
       // 4. Initialization Phase
       // If we don't have a mission profile yet, we are technically in INIT
       if (!missionProfileRef.current) {
-          setCurrentSessionState(SessionState.INIT);
+          transitionState(SessionState.INIT, "Pending Mission Profile");
           return;
       }
 
@@ -325,13 +364,12 @@ const App: React.FC = () => {
           // Parse target state, defaulting to MAIN_ACTIVE
           let targetState = SessionState.MAIN_ACTIVE;
           if (strategy.includes("MAIN_ACTIVE")) targetState = SessionState.MAIN_ACTIVE;
-          // Could add more parsing if other fixed states exist, but requirements say mostly MAIN_ACTIVE.
           
           // Brief buffer to allow INIT to resolve visually
           if (sessionStartTime && (Date.now() - sessionStartTime) < 5000) {
-              setCurrentSessionState(SessionState.INIT);
+              transitionState(SessionState.INIT, "Initial Buffer (Fixed Strategy)");
           } else {
-              setCurrentSessionState(targetState);
+              transitionState(targetState, "Fixed Strategy Protocol");
           }
           return;
       }
@@ -372,7 +410,7 @@ const App: React.FC = () => {
                        transitionTimersRef.current.warmupToMain = now;
                    } else if (now - transitionTimersRef.current.warmupToMain > 5000) {
                        // Confirm Transition
-                       setCurrentSessionState(SessionState.MAIN_ACTIVE);
+                       transitionState(SessionState.MAIN_ACTIVE, "Warmup targets met (Duration or HR)");
                        transitionTimersRef.current.warmupToMain = null;
                    }
               } else {
@@ -380,10 +418,10 @@ const App: React.FC = () => {
                    transitionTimersRef.current.warmupToMain = null;
                    // Ensure we stay in WARMUP unless we are INIT
                    if (currentSessionState !== SessionState.WARMUP && currentSessionState !== SessionState.INIT) {
-                       setCurrentSessionState(SessionState.WARMUP);
+                       transitionState(SessionState.WARMUP, "Conditions lost");
                    } else if (currentSessionState === SessionState.INIT && elapsedMinutes > 0.1) {
                        // Move INIT to WARMUP quickly
-                       setCurrentSessionState(SessionState.WARMUP);
+                       transitionState(SessionState.WARMUP, "Initialization complete");
                    }
               }
           }
@@ -396,7 +434,7 @@ const App: React.FC = () => {
                   if (!transitionTimersRef.current.mainToPause) {
                       transitionTimersRef.current.mainToPause = now;
                   } else if (now - transitionTimersRef.current.mainToPause > 30000) { // Changed to 30s
-                      setCurrentSessionState(SessionState.PAUSE);
+                      transitionState(SessionState.PAUSE, "HR below target for 30s");
                       transitionTimersRef.current.mainToPause = null;
                   }
               } else {
@@ -411,7 +449,7 @@ const App: React.FC = () => {
                   if (!transitionTimersRef.current.pauseToMain) {
                       transitionTimersRef.current.pauseToMain = now;
                   } else if (now - transitionTimersRef.current.pauseToMain > 5000) {
-                      setCurrentSessionState(SessionState.MAIN_ACTIVE);
+                      transitionState(SessionState.MAIN_ACTIVE, "HR recovered to target");
                       transitionTimersRef.current.pauseToMain = null;
                   }
               } else {
@@ -430,40 +468,33 @@ const App: React.FC = () => {
                   if (!transitionTimersRef.current.bonusToRecovery) {
                       transitionTimersRef.current.bonusToRecovery = now;
                   } else if (now - transitionTimersRef.current.bonusToRecovery > 5000) {
-                      setCurrentSessionState(SessionState.RECOVERY);
+                      transitionState(SessionState.RECOVERY, "Goals met, HR cooling down");
                       transitionTimersRef.current.bonusToRecovery = null;
                   }
               } else {
                   // Staying Active/Bonus
                   transitionTimersRef.current.bonusToRecovery = null;
-                  if (currentSessionState !== SessionState.BONUS_ACTIVE) setCurrentSessionState(SessionState.BONUS_ACTIVE);
+                  if (currentSessionState !== SessionState.BONUS_ACTIVE) {
+                      transitionState(SessionState.BONUS_ACTIVE, "Goals met, HR maintaining target");
+                  }
               }
           } else {
                // Currently RECOVERY
                if (!isRecoveryCondition) {
                    // Instant jump to BONUS_ACTIVE
-                   setCurrentSessionState(SessionState.BONUS_ACTIVE);
+                   transitionState(SessionState.BONUS_ACTIVE, "HR spiked above recovery ceiling");
                    transitionTimersRef.current.bonusToRecovery = null;
                } else {
                    // Staying Recovery
                    transitionTimersRef.current.bonusToRecovery = null;
-                   if (currentSessionState !== SessionState.RECOVERY) setCurrentSessionState(SessionState.RECOVERY);
+                   if (currentSessionState !== SessionState.RECOVERY) {
+                       transitionState(SessionState.RECOVERY, "Recovery logic fallback");
+                   }
                }
           }
       }
 
-  }, [isSessionActive, status, currentObjective, sessionStartTime, zones, activeTargetView, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, currentSessionState]);
-
-
-  const addLog = useCallback((message: string) => {
-    setLogs((prev) => {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      const msStr = String(now.getMilliseconds()).padStart(3, '0');
-      const newLog = { id: ++logIdRef.current, message, timestamp: `${timeStr}.${msStr}` };
-      return [newLog, ...prev].slice(0, MAX_LOG_ENTRIES);
-    });
-  }, []);
+  }, [isSessionActive, status, currentObjective, sessionStartTime, zones, activeTargetView, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, currentSessionState, transitionState]);
 
   // Performance Duration Timer
   useEffect(() => {
@@ -549,6 +580,16 @@ const App: React.FC = () => {
         }
     }
 
+    contentDebug += `--------------------------------------------------\n`;
+    
+    contentDebug += `[STATE TRANSITION HISTORY]\n`;
+    if (sessionTransitionsRef.current.length > 0) {
+        sessionTransitionsRef.current.forEach(t => {
+            contentDebug += `[${t.timestamp}] ${t.message}\n`;
+        });
+    } else {
+        contentDebug += `No transitions recorded.\n`;
+    }
     contentDebug += `--------------------------------------------------\n\n`;
 
     if (missionProfileRef.current) {
@@ -706,6 +747,30 @@ const App: React.FC = () => {
     processAudioQueueRef.current = processAudioQueue;
   }, [processAudioQueue]);
 
+  // --- AI Call Retry Helper ---
+  const generateContentWithRetry = useCallback(async (model: string, contents: any, config: any, maxRetries: number, logPrefix: string) => {
+      let attempt = 0;
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+      while (true) {
+          try {
+              return await ai.models.generateContent({ model, contents, config });
+          } catch (e: any) {
+              const errStr = String(e);
+              // Fast fail on client errors
+              if (errStr.includes('400') || errStr.includes('401') || errStr.includes('403') || errStr.includes('429') || errStr.includes('ResourceExhausted')) {
+                  throw e;
+              }
+              
+              if (attempt >= maxRetries) throw e;
+              
+              attempt++;
+              addLog(`${logPrefix}: 5xx/Network Error. Retrying (${attempt}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          }
+      }
+  }, [addLog]);
+
   const speakInsight = useCallback(async (text: string) => {
     if (!isVoiceEnabled) return;
 
@@ -799,18 +864,28 @@ const App: React.FC = () => {
             break;
     }
 
+    // Determine relevant states based on strategy
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    const isFixed = strategy.startsWith("fixed");
+    // Define states that require specific protocol instructions (excluding exceptions like ERROR/PAUSE)
+    const relevantStates = isFixed 
+        ? ["MAIN_ACTIVE", "BONUS_ACTIVE"]
+        : ["WARMUP", "MAIN_ACTIVE", "BONUS_ACTIVE", "RECOVERY"];
+    
+    const stateListString = relevantStates.join(', ');
+
     const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
 Selected Strategy: ${currentObjective.title}
 ${targetContext}
-Current Session State: ${currentSessionState}
 Contextual Instructions: "${currentObjective.prompt}"
 
 Requirements:
 1.  **Biometric Baselines**: Calculate Max HR (220-age) and specific BPM ranges for Zones 1–5.
 2.  **Primary Directive**: Identify the target zone(s) based on the Contextual Instructions and provide their BPM ranges. Include a +/- 3 BPM tolerance buffer where minor deviations are ignored. Explicitly restate the target time-in-zone percentage (from Contextual Instructions) required to classify the telemetry stream as 'good'.
-3.  **Adherence Protocol**: Based on the Contextual Instructions, define the judging criteria. Instead of a binary pass/fail, provide a descriptive guideline (e.g., "Maintain target zone for 80% of the session", "Allow for transient drops during recovery", "Strict adherence required for intervals").
-4.  **Recovery Parameters**: Define a Recovery Ceiling (BPM) for rest periods.
-5.  **Safety Limits**: State the Hard Safety Redline (100% intensity).
+3.  **Phase Protocols**: Provide a specific, 1-sentence instruction for each of these session states: ${stateListString}. Define what constitutes "success" in each phase.
+4.  **Adherence Protocol**: Based on the Contextual Instructions, define the judging criteria. Instead of a binary pass/fail, provide a descriptive guideline (e.g., "Maintain target zone for 80% of the session", "Allow for transient drops during recovery", "Strict adherence required for intervals").
+5.  **Recovery Parameters**: Define a Recovery Ceiling (BPM) for rest periods.
+6.  **Safety Limits**: State the Hard Safety Redline (100% intensity).
 
 Output Style: concise, structured, and directive. This profile will serve as the "ground truth" for an AI coach analyzing live telemetry.`;
 
@@ -818,11 +893,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
         addLog(`AI_REQUEST: Generating Mission Profile (Baseline)...`);
         addLog(`[DEBUG_MISSION_PROFILE_PROMPT] ${prompt}`); 
         
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-        });
+        const response = await generateContentWithRetry(
+            'gemini-3-flash-preview',
+            prompt,
+            undefined, // No config
+            4, // 4 Retries (Foundational)
+            'AI_MISSION_PROFILE'
+        );
         
         const tokenUsage = extractUsage(response);
         const profileText = response.text || "Mission profile generation failed. Using default heuristic.";
@@ -833,7 +910,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog, currentSessionState]);
+  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog, generateContentWithRetry]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
@@ -866,11 +943,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
       addLog(`AI_REQUEST: Generating intro for "${selectedPersona}"...`);
       addLog(`[DEBUG_INTRO_PROMPT] ${prompt}`); // Log to console
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-      });
+      const response = await generateContentWithRetry(
+          'gemini-3-flash-preview',
+          prompt,
+          undefined, // No config
+          1, // 1 Retry
+          'AI_INTRO'
+      );
 
       const tokenUsage = extractUsage(response);
       const introText = response.text || "Session initialized. AetherAegis monitoring active.";
@@ -889,37 +968,62 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry]);
 
   const generateSessionSummary = useCallback(async () => {
-    // Collect all past data
+    // Collect summaries
     const summaries = allSessionSummariesRef.current;
-    if (summaries.length < 2) return;
+    if (summaries.length === 0) return;
 
-    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
-    const historyText = summaries.map((s, i) => 
-        `Min ${i+1}: Avg ${s.avg}, Max ${s.max}, Min ${s.min}`
-    ).join('\n');
+    // Get the latest packet to append to the memory
+    const latestPacket = summaries[summaries.length - 1];
+    
+    // Recursive: Feed the *previous* mid-term memory back into the input
+    const previousMemoryText = currentSessionContextRef.current?.text || "";
+
+    // NEW: Get Transition History
+    const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
 
     const prompt = `
-    Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
-    Task: Review the session history below. Create a "Mid-Term Memory" summary of the overall performance trend so far.
-    Output: A detailed summary (2-3 sentences) describing the trajectory, preserving context about zone adherence and effort consistency.
+    Current Session State: ${latestPacket.sessionState}
+
+    Task: You are maintaining a structured "Mid-Term Memory" log of a workout session. 
+    Update the EXISTING SUMMARY using the NEW TELEMETRY and TRANSITION HISTORY.
+
+    FORMATTING RULES:
+    1. Output strictly in the format: "[STATE_NAME] summary of performance in this state".
+    2. Review the RECENT STATE TRANSITIONS. Ensure EVERY state that has occurred (e.g., [WARMUP], [MAIN_ACTIVE]) has a corresponding summary line.
+    3. If a state appears in the transitions but not in the existing summary (e.g. short-lived WARMUP), create a new entry for it summarizing that phase was completed.
+    4. If the state exists in the previous summary, update its description with the new data.
+    5. Keep summaries objective, concise, and technical. No personality or fluff. Do not use markdown bolding.
     
-    Session History:
-    ${historyText}
+    RECENT STATE TRANSITIONS (Context):
+    ${transitionHistory || "(No transitions yet)"}
+
+    EXISTING SUMMARY:
+    ${previousMemoryText || "(No history yet)"}
+
+    NEW TELEMETRY (Minute ${summaries.length}):
+    - State: ${latestPacket.sessionState}
+    - Avg HR: ${latestPacket.avg} BPM
+    - Max HR: ${latestPacket.max} BPM
+    - Insight: "${latestPacket.insight || 'N/A'}"
+
+    Output the updated state-based summary block:
     `;
 
     try {
-        addLog(`AI_REQUEST: Updating Mid-Term Memory Context...`);
+        addLog(`AI_REQUEST: Recursive Mid-Term Memory Update...`);
         addLog(`[DEBUG_MID_TERM_PROMPT] ${prompt}`); 
 
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-        });
+        const response = await generateContentWithRetry(
+            'gemini-3-flash-preview',
+            prompt,
+            undefined, // No config
+            1, // 1 Retry
+            'AI_MID_TERM_MEMORY'
+        );
         
         const tokenUsage = extractUsage(response);
         const summaryText = response.text || "Trends processing...";
@@ -931,7 +1035,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
         addLog(`AI_WARN: Failed to update session context.`);
     }
 
-  }, [selectedPersona, currentObjective, addLog]);
+  }, [currentObjective, addLog, generateContentWithRetry]);
 
   const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
     const summaries = allSessionSummariesRef.current;
@@ -939,6 +1043,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     const lastSummary = summaries[summaries.length - 1];
     const midTermContext = currentSessionContextRef.current ? currentSessionContextRef.current.text : "N/A";
+    // Get Mission Profile text
+    const missionProfileText = missionProfileRef.current ? missionProfileRef.current.text : "Standard Protocol";
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
     
     // Calculate simple stats for prompt
@@ -950,15 +1056,24 @@ Output Style: concise, structured, and directive. This profile will serve as the
     
     // Use Performance Minutes for Compliance, not Total Wall Clock Minutes
     const performanceMinutes = runningMetricsRef.current.performanceMinutes;
+    
+    // Compile Transition History
+    const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
 
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
+    Mission Plan / Profile: ${missionProfileText}
+
     Task: The workout session has ended. Generate a final session report based on the context below.
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
     
     Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM, Calories ${totalCalories.toFixed(0)}, Heart Points ${totalPoints}.
     Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
+    
+    Session State Timeline:
+    ${transitionHistory}
+
     Mid-Term Trend: ${midTermContext}
     Last Minute Insight: ${lastSummary.insight || "N/A"}
     `;
@@ -967,11 +1082,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
         addLog(`AI_REQUEST: Generating Final Session Report...`);
         addLog(`[DEBUG_FINAL_REPORT_PROMPT] ${prompt}`); 
         
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
-            contents: prompt,
-        });
+        const response = await generateContentWithRetry(
+            'gemini-3-flash-preview',
+            prompt,
+            undefined, // No config
+            1, // 1 Retry
+            'AI_FINAL_REPORT'
+        );
         
         const tokenUsage = extractUsage(response);
         const reportText = response.text || "Session concluded. Data saved.";
@@ -989,7 +1106,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry]);
 
   const requestAiInsight = async (summary: MinuteSummary) => {
     const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
@@ -1065,11 +1182,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-      });
+      const response = await generateContentWithRetry(
+          'gemini-3-flash-preview',
+          prompt,
+          undefined, // No config needed (prompt contains tailored system instruction)
+          1, // 1 Retry
+          'AI_INSIGHT'
+      );
 
       const tokenUsage = extractUsage(response);
       const insight = response.text || "Insight unavailable.";
@@ -1176,16 +1295,20 @@ Output Style: concise, structured, and directive. This profile will serve as the
     else if (avgHr >= zone2Min) points = 1;
 
     // --- Compliance Logic ---
-    // Determine current zone index for the minute average
-    const zoneIndex = zones.findIndex(z => avgHr >= z.min && avgHr < z.max);
-    // If not found but above max defined zone, default to highest zone (Index 4)
-    const finalZoneIndex = zoneIndex === -1 && avgHr >= zones[zones.length - 1].min ? zones.length - 1 : zoneIndex;
-    
+    // Allow for a 3 BPM margin to be "close enough"
     let isCompliant = false;
-    // Check if the calculated zone index is in the target zones for the current objective
-    // Note: zones are 0-indexed in array (Zone 1 = index 0)
-    if (finalZoneIndex !== -1 && currentObjective.targetZones.includes(finalZoneIndex)) {
-        isCompliant = true;
+    const margin = 3;
+
+    for (const targetZoneIdx of currentObjective.targetZones) {
+        const targetZone = zones[targetZoneIdx];
+        if (targetZone) {
+             const lowerBound = targetZone.min - margin;
+             const upperBound = targetZone.max === Infinity ? Infinity : targetZone.max + margin;
+             if (avgHr >= lowerBound && avgHr < upperBound) {
+                 isCompliant = true;
+                 break;
+             }
+        }
     }
 
     // --- Calorie Burn Logic (Keytel Equation) ---
@@ -1240,8 +1363,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
     // Trigger standard analysis
     requestAiInsight(newSummary);
 
-    // Check if we should update mid-term memory (After 2nd packet)
-    if (allSessionSummariesRef.current.length >= 2) {
+    // Check if we should update mid-term memory (After 1st packet)
+    if (allSessionSummariesRef.current.length >= 1) {
         generateSessionSummary();
     }
 
@@ -1363,6 +1486,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
     localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
     localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
+    localStorage.setItem(STORAGE_KEYS.SHOW_SYS, String(showSystemLogs));
+    localStorage.setItem(STORAGE_KEYS.SHOW_USER, String(showUserLogs));
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -1383,6 +1508,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     setCurrentHR(null);
     currentMinuteRef.current = [];
     allSessionSummariesRef.current = [];
+    sessionTransitionsRef.current = []; // Clear transitions log
     sessionIntroRef.current = null; // Clear intro ref on restart
     missionProfileRef.current = null; // Clear mission profile
     currentSessionContextRef.current = null; // Clear memory ref
@@ -1396,7 +1522,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     setElapsedTime("00:00:00");
     performanceDurationRef.current = 0; // Reset Performance Duration
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness, showSystemLogs, showUserLogs]);
 
   useEffect(() => {
     connect();
@@ -1411,7 +1537,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
       addLog(`SESSION: Workout stopped. Duration: ${elapsedTime}`);
       setSessionStartTime(null);
       setCurrentSessionState(SessionState.IDLE);
-      
+      transitionState(SessionState.IDLE, "User manually stopped session");
+
       // Generate Final Report before downloading
       await generateFinalSessionReport(elapsedTime);
       
@@ -1441,11 +1568,18 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
       const now = Date.now();
       setIsSessionActive(true);
-      setCurrentSessionState(SessionState.INIT);
+      
+      // Clear buffers BEFORE state transition logging
+      currentMinuteRef.current = []; 
+      allSessionSummariesRef.current = []; 
+      sessionTransitionsRef.current = []; // Clear transitions before first log
+      currentSessionContextRef.current = null; // Clear mid-term memory
+
+      // Log initial transition away from IDLE
+      transitionState(SessionState.INIT, "User manually started session");
+
       setSessionStartTime(now);
       setElapsedTime("00:00:00");
-      currentMinuteRef.current = []; // Clear buffer
-      allSessionSummariesRef.current = []; // Clear session history
       runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 }; // Reset metrics
       performanceDurationRef.current = 0; // Reset performance duration
       nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
@@ -1462,7 +1596,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
       generateMissionProfile(); // Establish baseline targets
       generateIntroMessage();   // Say hello
     }
-  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport, generateMissionProfile]);
+  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport, generateMissionProfile, transitionState]);
 
   // Compute the latest cleaned insight for display
   const latestInsightCleaned = useMemo(() => {
@@ -1471,6 +1605,17 @@ Output Style: concise, structured, and directive. This profile will serve as the
     if (introText) return cleanInsightText(introText);
     return undefined;
   }, [summaries, introText, finalReportText]);
+
+  // Filter logs for display based on category toggle state
+  const filteredLogs = useMemo(() => {
+    return logs.filter(log => {
+      // System categories regex
+      const isSystem = log.message.match(/^(SYSTEM|ERROR|WARNING|AUDIO|VOICE_WARN|VOICE_ERROR|AI_USAGE|AI_REQUEST|TELEMETRY|STATE_CHANGE)/);
+      if (isSystem) return showSystemLogs;
+      // All others (SESSION, METRICS, AI_INSIGHT, etc.) are considered User Logs
+      return showUserLogs;
+    });
+  }, [logs, showSystemLogs, showUserLogs]);
 
   return (
     <div className="min-h-screen bg-[#050608] bg-grid text-slate-200 p-4 md:p-8 flex flex-col items-center relative">
@@ -1610,6 +1755,26 @@ Output Style: concise, structured, and directive. This profile will serve as the
               </div>
               
               <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">System Logs</label>
+                <button 
+                  onClick={() => setShowSystemLogs(!showSystemLogs)}
+                  className={`px-3 py-1.5 border font-bold rounded-sm transition-all uppercase text-[9px] tracking-widest ${showSystemLogs ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.1)]' : 'bg-slate-900/50 text-slate-500 border-white/10 hover:border-white/20'}`}
+                >
+                  {showSystemLogs ? 'Sys: ON' : 'Sys: OFF'}
+                </button>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">User Logs</label>
+                <button 
+                  onClick={() => setShowUserLogs(!showUserLogs)}
+                  className={`px-3 py-1.5 border font-bold rounded-sm transition-all uppercase text-[9px] tracking-widest ${showUserLogs ? 'bg-purple-500/20 text-purple-400 border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.1)]' : 'bg-slate-900/50 text-slate-500 border-white/10 hover:border-white/20'}`}
+                >
+                  {showUserLogs ? 'Usr: ON' : 'Usr: OFF'}
+                </button>
+              </div>
+
+              <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Log Stream</label>
                 <button 
                   onClick={() => setShowRawTelemetry(!showRawTelemetry)}
@@ -1684,7 +1849,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
           )}
         </div>
       </div>
-      <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-500 ease-in-out transform ${showDebug ? 'translate-y-0' : 'translate-y-full'}`}><DebugLog logs={logs} onClose={() => setShowDebug(false)} /></div>
+      <div className={`fixed bottom-0 left-0 right-0 z-50 transition-transform duration-500 ease-in-out transform ${showDebug ? 'translate-y-0' : 'translate-y-full'}`}><DebugLog logs={filteredLogs} onClose={() => setShowDebug(false)} /></div>
       <footer className="mt-auto py-8 text-center text-[10px] uppercase tracking-[0.2em] text-slate-600 font-bold">AetherAegis Biometric Monitoring Suite // v5.10.0-ReConnect.8080</footer>
     </div>
   );
