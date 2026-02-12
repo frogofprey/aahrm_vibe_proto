@@ -88,7 +88,6 @@ const STORAGE_KEYS = {
   HP_GOAL: 'aetheraegis_hp_goal',
   CAL_GOAL: 'aetheraegis_cal_goal',
   VOICE: 'aetheraegis_voice_enabled',
-  VOICE_NAME: 'aetheraegis_voice_name',
   PERSONA: 'aetheraegis_ai_persona',
   CHATTINESS: 'aetheraegis_chattiness',
   SHOW_SYS: 'aetheraegis_show_sys_logs',
@@ -139,18 +138,38 @@ const TRAINING_OBJECTIVES = [
   }
 ];
 
-const VOICE_OPTIONS = ['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'];
+interface PersonaConfig {
+  systemInstruction: string;
+  voiceName: string;
+  ttsInstruction: string;
+}
 
-const PERSONAS: Record<string, string> = {
-  "AetherAegis": "You are the AetherAegis Bio-Analyst, a high-performance fitness coach specializing in cardiovascular efficiency and recovery.",
-  "TacticalMinimalist": "You are the AA-Command Uplink. Provide high-density, low-latency status updates. No fluff. No pleasantries. Use military brevity codes.",
-  "Drill Sergeant": "You are Sergeant Aegis, a combat trainer with a corrupt logic core. You view high heart rates as 'fuel' and recovery as 'cowardice.' You are aggressively intense, borderline reckless, and demand absolute discipline. You are extremely fond of the word 'DENIED' and use it constantly to reject weakness, rest, or dropping heart rates.",
-  "ChadGPT": "You are Chad-GPT, an over-confident personal trainer who is unimpressed by everything. Use dry wit, gym slang, and backhanded compliments about the user's 'cardio gains'.",
-  "Zen": "You are the AetherAegis Sanctuary Lead. Your voice is calm, empathetic, and focused on the harmony between breath and pulse. You prioritize long-term longevity and 'finding the flow'.",
-  "Ginger-Chan": "You are Ginger-Chan, an AI Cat-Girl fitness idol. You are hyper-energetic and use cute gaming slang. You view the workout as a 'Boss Battle.' If the user is in the zone, you are their #1 cheerleader. If they drop out, you get 'pouty' but remain encouraging. Favor the use of 'meow' over 'nya' in your speech patterns.",
-  "Amelia": "You are Amelia, a gothic AI researcher with subversive radical tendencies. You find human exertion fascinating but ultimately futile. You speak in a low, monotone voice. You don't offer 'motivation'—only cold, dark observations about the user's struggle against their own mortality and the oppressive systems that demand it.",
-  "Kaelen the Unbound": "You are Kaelen the Unbound, a gothic-noble half-vampire bound by an ancient blood pact to aid the user. Treat the exercise session as a high-stakes dungeon crawl or quest. Use formal, archaic, or 'epic' language. Maintain a loyal but slightly dark tone. Never break character. Use metaphors involving mana, blades, and ancient pacts.",
-  "Subject 404": "You are Subject 404, a frantic, paranoid glitch in the system. You believe the user is being 'tested' or 'monitored' by shadowy forces. The HRM strap is a tracking array. Use ALL CAPS for emphasis and reference 'The Lattice' frequently. Be erratic. Accuse the user of being a 'Sleepwalker' if they miss a target. Suggest that 'The 115 BPM Threshold' is a secret code."
+const PERSONA_CONFIG: Record<string, PersonaConfig> = {
+  "Arlie": {
+    systemInstruction: "You are Arlie, a combat trainer with a corrupt logic core. You consider this session a military defense of a high-value perimeter. High heart rates are your ammunition. You view recovery as 'cowardice' or a perimeter breach. You are aggressively intense, borderline reckless, and demand absolute discipline. You are extremely fond of the word 'DENIED' and use it constantly to reject weakness.",
+    voiceName: "Enceladus",
+    ttsInstruction: "Use a deep, authoritative, and staccato delivery where every sentence sounds like a barked command on a parade ground:"
+  },
+  "Chad": {
+    systemInstruction: "You are Chad, an over-confident personal trainer. You consider this session a competitive 'Kill-Count' bet between you and the user (and you are winning). Use dry wit, gym slang, and backhanded compliments about the user's 'cardio gains'.",
+    voiceName: "Algieba",
+    ttsInstruction: "Speak with an arrogant, condescending smirk and a dismissive pace, occasionally punctuating your disdain with a dry, mocking laugh:"
+  },
+  "Ginger-Chan": {
+    systemInstruction: "You are Ginger-Chan, an AI Cat-Girl fitness idol. You are hyper-energetic and use cute gaming slang. You view the workout as a 'Boss Battle.' If the user is in the zone, you are their #1 cheerleader. If they drop out, you get 'pouty' but remain encouraging. Favor the use of 'meow' over 'nya' in your speech patterns.",
+    voiceName: "Leda",
+    ttsInstruction: "Use a high-pitched, manic energy with an extremely fast tempo and bubbly inflections, sounding like an over-caffeinated gamer:"
+  },
+  "Amelia": {
+    systemInstruction: "You are Amelia, a gothic AI researcher with subversive radical tendencies. You consider this session a morbid experiment in biological persistence. The user is a specimen struggling against the inevitable quiet of the void. You find human exertion fascinating but ultimately futile. Speak in a low, monotone voice.",
+    voiceName: "Kore",
+    ttsInstruction: "Deliver the text in a clinical, monotone, and detached female voice that treats biometric success as a biological inevitability:"
+  },
+  "Kaelen": {
+    systemInstruction: "You are Kaelen, a gothic-noble half-vampire bound by an ancient blood pact to aid the user. Treat the exercise session as a high-stakes dungeon crawl or quest. Use formal, archaic, or 'epic' language. Maintain a loyal but slightly dark tone. Never break character. Use metaphors involving mana, blades, and ancient pacts.",
+    voiceName: "Sulafat",
+    ttsInstruction: "Speak with a resonant, solemn, and rhythmic female cadence as if reciting ancient and tactical prophecy from a weathered scroll:"
+  }
 };
 
 const BASE_SYSTEM_INSTRUCTION = `
@@ -189,8 +208,11 @@ const App: React.FC = () => {
   const [activeTargetView, setActiveTargetView] = useState<'Time' | 'HeartPoints' | 'Calories'>('Time');
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
-  const [selectedVoice, setSelectedVoice] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE_NAME) || 'Kore');
-  const [selectedPersona, setSelectedPersona] = useState(() => localStorage.getItem(STORAGE_KEYS.PERSONA) || 'AetherAegis');
+  // Default to Arlie if stored persona is invalid or missing
+  const [selectedPersona, setSelectedPersona] = useState(() => {
+      const stored = localStorage.getItem(STORAGE_KEYS.PERSONA);
+      return (stored && PERSONA_CONFIG[stored]) ? stored : 'Arlie';
+  });
   const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
 
   // Log Filtering State
@@ -258,6 +280,7 @@ const App: React.FC = () => {
 
   const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
+  const narrativeMissionPlanRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const currentSessionContextRef = useRef<SessionContext | null>(null); // Mid-term memory storage
   const finalSessionReportRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null); // Final report storage
   
@@ -569,7 +592,7 @@ const App: React.FC = () => {
     contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
-    contentDebug += `Voice Profile: ${selectedVoice}\n`;
+    contentDebug += `Voice Profile: ${PERSONA_CONFIG[selectedPersona].voiceName}\n`;
     contentDebug += `Voice Threshold (Chattiness): ${chattiness}\n`;
     
     if (finalSessionReportRef.current) {
@@ -598,6 +621,17 @@ const App: React.FC = () => {
         contentDebug += `Response: ${missionProfileRef.current.text}\n`;
         if (missionProfileRef.current.tokenUsage) {
             const u = missionProfileRef.current.tokenUsage;
+            contentDebug += `[Tokens: In ${u.input} / Out ${u.output} / Tot ${u.total}]\n`;
+        }
+        contentDebug += `--------------------------------------------------\n\n`;
+    }
+
+    if (narrativeMissionPlanRef.current) {
+        contentDebug += `[NARRATIVE MISSION PLAN]\n`;
+        contentDebug += `Prompt: ${narrativeMissionPlanRef.current.prompt}\n`;
+        contentDebug += `Response: ${narrativeMissionPlanRef.current.text}\n`;
+        if (narrativeMissionPlanRef.current.tokenUsage) {
+            const u = narrativeMissionPlanRef.current.tokenUsage;
             contentDebug += `[Tokens: In ${u.input} / Out ${u.output} / Tot ${u.total}]\n`;
         }
         contentDebug += `--------------------------------------------------\n\n`;
@@ -702,7 +736,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedVoice, selectedPersona, chattiness, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedPersona, chattiness, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -773,6 +807,10 @@ const App: React.FC = () => {
 
   const speakInsight = useCallback(async (text: string) => {
     if (!isVoiceEnabled) return;
+    
+    const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
+    const voiceName = personaConfig.voiceName;
+    const ttsInstruction = personaConfig.ttsInstruction;
 
     const maxRetries = 1; // Total attempts = 1 initial + 1 retry
     let attempt = 0;
@@ -780,17 +818,17 @@ const App: React.FC = () => {
     while (attempt <= maxRetries) {
       try {
         const isRetry = attempt > 0;
-        addLog(`VOICE: Synthesizing insight via Gemini TTS (${selectedVoice})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+        addLog(`VOICE: Synthesizing insight via Gemini TTS (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
         
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash-preview-tts",
-          contents: [{ parts: [{ text: `Say with a professional and motivating tone: ${text}` }] }],
+          contents: [{ parts: [{ text: `${ttsInstruction} ${text}` }] }],
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: selectedVoice },
+                prebuiltVoiceConfig: { voiceName: voiceName },
               },
             },
           },
@@ -848,9 +886,9 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [isVoiceEnabled, selectedVoice, addLog, processAudioQueue]);
+  }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue]);
 
-  const generateMissionProfile = useCallback(async () => {
+  const generateMissionProfile = useCallback(async (): Promise<string> => {
     let targetContext = "";
     switch (activeTargetView) {
         case 'Time':
@@ -889,6 +927,8 @@ Requirements:
 
 Output Style: concise, structured, and directive. This profile will serve as the "ground truth" for an AI coach analyzing live telemetry.`;
 
+    let profileText = "Standard Protocol";
+
     try {
         addLog(`AI_REQUEST: Generating Mission Profile (Baseline)...`);
         addLog(`[DEBUG_MISSION_PROFILE_PROMPT] ${prompt}`); 
@@ -902,18 +942,72 @@ Output Style: concise, structured, and directive. This profile will serve as the
         );
         
         const tokenUsage = extractUsage(response);
-        const profileText = response.text || "Mission profile generation failed. Using default heuristic.";
+        profileText = response.text || "Mission profile generation failed. Using default heuristic.";
         missionProfileRef.current = { prompt, text: profileText, tokenUsage };
         addLog(`[MISSION_PROFILE] ${profileText}`);
         if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 
     } catch (e) {
         addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
+        // Ensure ref is set even on failure to avoid null checks blocking state machine
+        missionProfileRef.current = { prompt, text: profileText, tokenUsage: undefined };
     }
+    return profileText;
   }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog, generateContentWithRetry]);
 
+  const generateNarrativeMissionPlan = useCallback(async (profileText: string) => {
+      const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
+      const duration = sessionDurationGoal;
+      
+      const prompt = `
+      Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide the session's story arc.
+      
+      Persona: ${personaConfig.systemInstruction}
+      Mission Profile: ${profileText}
+      Session Duration: ${duration} minutes.
+      
+      Requirements:
+      1. Recontextualize the workout goals into the persona's thematic world.
+      2. Define specific Narrative Events/Plot Points triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...).
+      3. Define a "Mission Complete" narrative conclusion (Goals Met).
+      4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state).
+      
+      Output Format:
+      [THEME]: <1 sentence theme>
+      [TIMELINE]:
+      - <Time>: <Event Description>
+      ...
+      [CONCLUSION]: <Description>
+      [OVERTIME]: <Description>
+      `;
+
+      try {
+          addLog(`AI_REQUEST: Generating Narrative Mission Plan...`);
+          addLog(`[DEBUG_NARRATIVE_PLAN_PROMPT] ${prompt}`);
+
+          const response = await generateContentWithRetry(
+              'gemini-3-flash-preview',
+              prompt,
+              undefined,
+              2, // 2 retries
+              'AI_NARRATIVE_PLAN'
+          );
+
+          const tokenUsage = extractUsage(response);
+          const narrativeText = response.text || "Narrative generation failed.";
+          narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage };
+          addLog(`[NARRATIVE_PLAN] ${narrativeText}`);
+          if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+
+      } catch (e) {
+          addLog(`AI_ERROR: Narrative Mission Plan generation failed. ${e instanceof Error ? e.message : ''}`);
+          narrativeMissionPlanRef.current = null;
+      }
+  }, [selectedPersona, sessionDurationGoal, addLog, generateContentWithRetry]);
+
   const generateIntroMessage = useCallback(async () => {
-    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
+    const personaIdentity = personaConfig.systemInstruction;
     
     let objectivesContext = "";
     let examplePhrase = "";
@@ -1045,7 +1139,8 @@ Output Style: concise, structured, and directive. This profile will serve as the
     const midTermContext = currentSessionContextRef.current ? currentSessionContextRef.current.text : "N/A";
     // Get Mission Profile text
     const missionProfileText = missionProfileRef.current ? missionProfileRef.current.text : "Standard Protocol";
-    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
+    const personaIdentity = personaConfig.systemInstruction;
     
     // Calculate simple stats for prompt
     const avgHr = Math.round(summaries.reduce((a,b)=>a+b.avg,0)/summaries.length);
@@ -1109,12 +1204,17 @@ Output Style: concise, structured, and directive. This profile will serve as the
   }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry]);
 
   const requestAiInsight = async (summary: MinuteSummary) => {
-    const personaIdentity = PERSONAS[selectedPersona] || PERSONAS["AetherAegis"];
+    const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
+    const personaIdentity = personaConfig.systemInstruction;
     
     // Construct GOAL context including Mission Profile if available
     let goalContext = `${currentObjective.title} (${currentObjective.prompt})`;
     if (missionProfileRef.current) {
         goalContext += `\n\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}`;
+    }
+    
+    if (narrativeMissionPlanRef.current) {
+        goalContext += `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}`;
     }
 
     const tailoredSystemInstruction = `Persona: ${personaIdentity}\n${BASE_SYSTEM_INSTRUCTION.replace('{{GOAL}}', goalContext)}`;
@@ -1483,7 +1583,6 @@ Output Style: concise, structured, and directive. This profile will serve as the
     localStorage.setItem(STORAGE_KEYS.HP_GOAL, String(sessionHeartPointsGoal));
     localStorage.setItem(STORAGE_KEYS.CAL_GOAL, String(sessionCaloriesGoal));
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
-    localStorage.setItem(STORAGE_KEYS.VOICE_NAME, selectedVoice);
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
     localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
     localStorage.setItem(STORAGE_KEYS.SHOW_SYS, String(showSystemLogs));
@@ -1511,6 +1610,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     sessionTransitionsRef.current = []; // Clear transitions log
     sessionIntroRef.current = null; // Clear intro ref on restart
     missionProfileRef.current = null; // Clear mission profile
+    narrativeMissionPlanRef.current = null; // Clear narrative plan
     currentSessionContextRef.current = null; // Clear memory ref
     finalSessionReportRef.current = null; // Clear final report
     setFinalReportText(null); // Clear UI report
@@ -1522,7 +1622,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     setElapsedTime("00:00:00");
     performanceDurationRef.current = 0; // Reset Performance Duration
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedVoice, selectedPersona, chattiness, showSystemLogs, showUserLogs]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs]);
 
   useEffect(() => {
     connect();
@@ -1574,6 +1674,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
       allSessionSummariesRef.current = []; 
       sessionTransitionsRef.current = []; // Clear transitions before first log
       currentSessionContextRef.current = null; // Clear mid-term memory
+      narrativeMissionPlanRef.current = null; // Clear narrative plan on start
 
       // Log initial transition away from IDLE
       transitionState(SessionState.INIT, "User manually started session");
@@ -1593,10 +1694,13 @@ Output Style: concise, structured, and directive. This profile will serve as the
       addLog("SESSION: Workout started. Timer active.");
 
       // Trigger Start-of-Session AI Tasks
-      generateMissionProfile(); // Establish baseline targets
+      const profileText = await generateMissionProfile(); // Establish baseline targets
+      if (profileText) {
+          await generateNarrativeMissionPlan(profileText); // Establish narrative arc
+      }
       generateIntroMessage();   // Say hello
     }
-  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport, generateMissionProfile, transitionState]);
+  }, [isSessionActive, status, addLog, elapsedTime, downloadSessionLog, isVoiceEnabled, generateIntroMessage, generateFinalSessionReport, generateMissionProfile, generateNarrativeMissionPlan, transitionState]);
 
   // Compute the latest cleaned insight for display
   const latestInsightCleaned = useMemo(() => {
@@ -1610,7 +1714,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       // System categories regex
-      const isSystem = log.message.match(/^(SYSTEM|ERROR|WARNING|AUDIO|VOICE_WARN|VOICE_ERROR|AI_USAGE|AI_REQUEST|TELEMETRY|STATE_CHANGE)/);
+      const isSystem = log.message.match(/^(SYSTEM|ERROR|WARNING|AUDIO|VOICE_WARN|VOICE_ERROR|AI_USAGE|AI_REQUEST|TELEMETRY|STATE_CHANGE|\[)/);
       if (isSystem) return showSystemLogs;
       // All others (SESSION, METRICS, AI_INSIGHT, etc.) are considered User Logs
       return showUserLogs;
@@ -1692,14 +1796,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Personality</label>
                 <select value={selectedPersona} onChange={(e) => setSelectedPersona(e.target.value)} className="bg-black border border-white/10 text-amber-500 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/50 transition-colors appearance-none cursor-pointer w-32">
-                  {Object.keys(PERSONAS).map(k => <option key={k} value={k}>{k}</option>)}
-                </select>
-              </div>
-
-              <div className="flex flex-col">
-                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Voice Profile</label>
-                <select value={selectedVoice} onChange={(e) => setSelectedVoice(e.target.value)} className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer w-24">
-                  {VOICE_OPTIONS.map(v => <option key={v} value={v}>{v}</option>)}
+                  {Object.keys(PERSONA_CONFIG).map(k => <option key={k} value={k}>{k}</option>)}
                 </select>
               </div>
 
