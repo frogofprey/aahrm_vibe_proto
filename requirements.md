@@ -39,12 +39,16 @@
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal.
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
+*   **Narrative Mission Plan**: Upon session initialization, the system must generate a "Narrative Mission Plan" using the selected Persona.
+    *   **State Transitions**: Explicitly define narrative triggers for "Warmup Completion" and "Mission Completion".
+    *   **Narrative Events**: Create distinct plot points spaced at least 1 minute apart.
+    *   **Integration**: The generated plan serves as the narrative arc for the AI Coach to follow during the session.
 *   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, **peak HR**, Total Calories, and Total Heart Points.
     *   **Compliance Data**: The report must cite compliance based on Performance Minutes (e.g., "15/20 performance minutes compliant").
     *   **Audio**: If the voice profile is enabled, this final report must be read aloud via TTS.
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
-        *   Contains full debug details, prompts, raw telemetry, mission profile, mid-term memory, and final report diagnostics.
+        *   Contains full debug details, prompts, raw telemetry, mission profile, **narrative mission plan**, mid-term memory, and final report diagnostics.
         *   Header must include Subject Age, **Subject Weight**, **Subject Gender**, Training Objective, **Session Objectives** (Time, HP, Kcal).
         *   Body must include per-minute breakdown of Calories and Heart Points.
     2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
@@ -64,12 +68,18 @@
         *   Current Heart Points / Target Heart Points
         *   Current Calories / Target Calories
         *   Compliance: X/Y **Performance Minutes**
-*   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, and Mission Profile) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
+*   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, Mission Profile, and **Narrative Plan**) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
-*   **Persona**: The AI must adopt one of the configurable personas (AetherAegis, TacticalMinimalist, Drill Sergeant, ChadGPT, Zen, Ginger-Chan, Amelia), tailoring advice to the user's specific "Training Objective".
-*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`) and play it via the browser's AudioContext.
+*   **Persona**: The AI must adopt one of the configurable personas, tailoring advice to the user's specific "Training Objective". Supported Personas:
+    *   **Arlie** (Tactical/Military, Voice: Enceladus)
+    *   **Chad** (Competitive/Gym Bro, Voice: Algieba)
+    *   **Ginger-Chan** (Anime/Gamer, Voice: Leda)
+    *   **Amelia** (Gothic/Nihilist, Voice: Kore)
+    *   **Kaelen** (Fantasy/Noble, Voice: Sulafat)
+*   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`).
+    *   **Audio Queueing**: The system must implement an audio queue to play TTS segments sequentially, preventing overlap.
     *   **Retry Logic**: The system must attempt one retry on synthesis failure.
-    *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately to prevent API throttling.
+    *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately.
     *   **Chattiness Threshold**: Allow the user to set a threshold (1-10, default 4). Only AI insights with a Saliency Score greater than or equal to this threshold will trigger TTS.
 
 ### 1.5 Configuration & Persistence
@@ -97,6 +107,7 @@
 
 ### 1.6 System Logging
 *   **Debug Console**: Provide a toggleable panel displaying system events, raw telemetry logs, and API interactions.
+    *   **Narrative Plan** generation events must be visually distinct.
     *   **Mid-Term Memory** updates should be visually distinct (e.g., Purple).
     *   **Mission Profile** events should be visually distinct (e.g., Cyan).
     *   **Final Report** events should be visually distinct (e.g., Emerald/Amber).
@@ -108,7 +119,7 @@ The application implements a state machine to track the user's workout phase. Tr
 
 *   **State Definitions**:
     *   **IDLE**: Session is stopped or has not started.
-    *   **INIT**: Session started; performing initial AI handshakes and loading mission profile (< 5 seconds).
+    *   **INIT**: Session started; performing initial AI handshakes, loading mission profile, and **generating narrative plan**.
     *   **WARMUP**: Early phase; HR is below target, or session duration is < 2 minutes. Time does *not* count towards Performance Duration.
     *   **MAIN_ACTIVE**: Primary workout phase; HR is within or above target. Time counts towards Performance Duration.
     *   **PAUSE**: Intensity drop during the main phase (HR < Target for > 30s). Time does *not* count towards Performance Duration.
@@ -132,7 +143,7 @@ The application implements a state machine to track the user's workout phase. Tr
 
 ### 2.1 Performance & Latency
 *   **Rendering**: The dashboard must handle high-frequency updates (1Hz or higher) without UI freezing.
-*   **Audio Latency**: Audio buffers for TTS must be decoded and played immediately upon receipt to ensure coaching relevance.
+*   **Audio Queueing**: Audio buffers for TTS must be queued and played sequentially. The system must wait for the current segment to finish before playing the next to prevent audio overlap.
 *   **Resource Management**: Data arrays (charts, logs) must be capped (e.g., max 50 chart points, max 100 log entries) to prevent memory leaks over long sessions.
 
 ### 2.2 User Interface & Experience (UI/UX)
