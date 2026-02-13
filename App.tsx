@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState } from './types';
@@ -1023,13 +1024,19 @@ Output Style: concise, structured, and directive. This profile will serve as the
         examplePhrase = `"We are burning ${sessionCaloriesGoal} calories today"`;
     }
 
+    let narrativeContext = "";
+    if (narrativeMissionPlanRef.current) {
+        narrativeContext = `\nNarrative Mission Plan:\n${narrativeMissionPlanRef.current.text}`;
+    }
+
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
     ${objectivesContext}
+    ${narrativeContext}
     
     Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
-    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them.
+    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately.
     Constraint: Maximum 25 words. Strictly adhere to persona.
     `;
 
