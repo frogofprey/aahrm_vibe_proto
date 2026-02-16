@@ -61,3 +61,9 @@ export interface ZoneConfig {
   borderClass: string;
   textClass: string;
 }
+
+export interface PersonaConfig {
+  systemInstruction: string;
+  voiceName: string;
+  ttsInstruction: string;
+}
