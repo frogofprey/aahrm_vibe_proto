@@ -103,6 +103,7 @@
     *   Device ID (Hex)
     *   Audio/Voice Toggle
     *   Voice Threshold (Chattiness)
+    *   **Telemetry Abstraction** (Default: On) - Toggle between abstract descriptors and raw BPM recitation. This setting must apply globally to **Session Intro**, **Periodic Coaching Insights**, and the **Final Session Report**.
 *   **Persistence**: All configuration settings must be saved to `localStorage` and restored upon page reload.
 
 ### 1.6 System Logging

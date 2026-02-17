@@ -92,7 +92,8 @@ const STORAGE_KEYS = {
   PERSONA: 'aetheraegis_ai_persona',
   CHATTINESS: 'aetheraegis_chattiness',
   SHOW_SYS: 'aetheraegis_show_sys_logs',
-  SHOW_USER: 'aetheraegis_show_user_logs'
+  SHOW_USER: 'aetheraegis_show_user_logs',
+  ABSTRACTION: 'aetheraegis_telemetry_abstraction'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -141,11 +142,14 @@ const TRAINING_OBJECTIVES = [
 
 const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 
+const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless critically necessary for safety (Score 7+). Instead, use qualitative descriptors (e.g., "surging," "drifting lower," "holding the line").`;
+
 const BASE_SYSTEM_INSTRUCTION = `
 Data Input: You will receive "Minute Packets" containing an array of raw BPM samples, an average, and a Max/Min.
 Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
+{{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review the provided [HISTORY] and [MID-TERM CONTEXT]. Do NOT repeat phrases, metaphors, or specific advice used recently. Vary your delivery. Exceptions are made only for critical safety warnings (Score 7+).
 Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on completed phases and timeline events when appropriate.
 Mission Plan: {{GOAL}}
@@ -184,6 +188,9 @@ const App: React.FC = () => {
       return (stored && PERSONA_CONFIG[stored]) ? stored : 'Arlie';
   });
   const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
+  
+  // New: Telemetry Abstraction Setting
+  const [isTelemetryAbstractionEnabled, setIsTelemetryAbstractionEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.ABSTRACTION) !== 'false');
 
   // Log Filtering State
   const [showSystemLogs, setShowSystemLogs] = useState(() => localStorage.getItem(STORAGE_KEYS.SHOW_SYS) !== 'false');
@@ -564,6 +571,7 @@ const App: React.FC = () => {
     contentDebug += `Personality: ${selectedPersona}\n`;
     contentDebug += `Voice Profile: ${PERSONA_CONFIG[selectedPersona].voiceName}\n`;
     contentDebug += `Voice Threshold (Chattiness): ${chattiness}\n`;
+    contentDebug += `Telemetry Abstraction: ${isTelemetryAbstractionEnabled}\n`;
     
     if (finalSessionReportRef.current) {
         contentDebug += `Final Session Report: ${finalSessionReportRef.current.text}\n`;
@@ -706,7 +714,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedPersona, chattiness, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedPersona, chattiness, isTelemetryAbstractionEnabled, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -998,12 +1006,17 @@ Output Style: concise, structured, and directive. This profile will serve as the
         narrativeContext = `\nNarrative Mission Plan:\n${narrativeMissionPlanRef.current.text}`;
     }
 
+    // Conditionally include Telemetry Abstraction Instruction
+    const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
+
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
     ${objectivesContext}
     ${narrativeContext}
     
+    ${abstractionInstruction}
+
     Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
     Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately.
     Constraint: Maximum 25 words. Strictly adhere to persona.
@@ -1038,7 +1051,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect summaries
@@ -1131,10 +1144,15 @@ Output Style: concise, structured, and directive. This profile will serve as the
     // Compile Transition History
     const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
 
+    // Conditionally include Telemetry Abstraction Instruction
+    const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
+
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title} (${currentObjective.prompt})
     Mission Plan / Profile: ${missionProfileText}
+
+    ${abstractionInstruction}
 
     Task: The workout session has ended. Generate a final session report based on the context below.
     Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
@@ -1177,7 +1195,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
 
   const requestAiInsight = async (summary: MinuteSummary) => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1193,7 +1211,12 @@ Output Style: concise, structured, and directive. This profile will serve as the
         goalContext += `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}`;
     }
 
-    const tailoredSystemInstruction = `Persona: ${personaIdentity}\n${BASE_SYSTEM_INSTRUCTION.replace('{{GOAL}}', goalContext)}`;
+    // Conditionally include Telemetry Abstraction Instruction
+    const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
+    
+    const tailoredSystemInstruction = `Persona: ${personaIdentity}\n${BASE_SYSTEM_INSTRUCTION
+        .replace('{{GOAL}}', goalContext)
+        .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}`;
     
     // --- HISTORY BUILDER START ---
     const allSummaries = allSessionSummariesRef.current;
@@ -1563,6 +1586,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
     localStorage.setItem(STORAGE_KEYS.SHOW_SYS, String(showSystemLogs));
     localStorage.setItem(STORAGE_KEYS.SHOW_USER, String(showUserLogs));
+    localStorage.setItem(STORAGE_KEYS.ABSTRACTION, String(isTelemetryAbstractionEnabled));
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -1598,7 +1622,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     setElapsedTime("00:00:00");
     performanceDurationRef.current = 0; // Reset Performance Duration
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled]);
 
   useEffect(() => {
     connect();
@@ -1777,6 +1801,16 @@ Output Style: concise, structured, and directive. This profile will serve as the
               </div>
 
               <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Data Verbalization</label>
+                <button 
+                  onClick={() => setIsTelemetryAbstractionEnabled(!isTelemetryAbstractionEnabled)}
+                  className={`px-3 py-1.5 border font-bold rounded-sm transition-all uppercase text-[9px] tracking-widest ${isTelemetryAbstractionEnabled ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40 shadow-[0_0_10px_rgba(99,102,241,0.1)]' : 'bg-slate-900/50 text-slate-500 border-white/10 hover:border-white/20'}`}
+                >
+                  {isTelemetryAbstractionEnabled ? 'Abstract: ON' : 'Abstract: OFF'}
+                </button>
+              </div>
 
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Voice Threshold</label>
