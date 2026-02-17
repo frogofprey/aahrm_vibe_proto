@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
 import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig } from './types';
@@ -147,6 +146,7 @@ Data Input: You will receive "Minute Packets" containing an array of raw BPM sam
 Core Constraints:
 PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
+Anti-Repetition: Review the provided [HISTORY] and [MID-TERM CONTEXT]. Do NOT repeat phrases, metaphors, or specific advice used recently. Vary your delivery. Exceptions are made only for critical safety warnings (Score 7+).
 Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on completed phases and timeline events when appropriate.
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
