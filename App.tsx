@@ -8,6 +8,7 @@ import StatusBadge from './components/StatusBadge';
 import DebugLog from './components/DebugLog';
 import AggregatorPanel from './components/AggregatorPanel';
 import { personalityData } from './personality';
+import { TRAINING_OBJECTIVES } from './training_objectives';
 
 // --- Audio Decoding Utilities ---
 function decodeBase64(base64: string) {
@@ -100,45 +101,6 @@ const MAX_DATA_POINTS = 50;
 const MAX_LOG_ENTRIES = 100;
 const HR_MIN_VALID = 40;
 const HR_MAX_VALID = 220;
-
-const TRAINING_OBJECTIVES = [
-  { 
-    title: "Wellness", 
-    targetZones: [0], 
-    prompt: "zone 0-1 primary, but only note current zone and don't steer towards a specific target",
-    transitionStrategy: "fixed state - MAIN_ACTIVE" 
-  },
-  { 
-    title: "Low Intensity Weight Loss", 
-    targetZones: [1], 
-    prompt: "zone 2 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant",
-    transitionStrategy: "normal state"
-  },
-  { 
-    title: "Mid Intensity Weight Loss", 
-    targetZones: [2], 
-    prompt: "zone 3 primary - try to stay here for 80% of the workout - can be 2-3 bpm out of zone and still be compliant",
-    transitionStrategy: "normal state"
-  },
-  { 
-    title: "General Weight Loss", 
-    targetZones: [1, 2], 
-    prompt: "zone 2 or 3 - try to stay here 90% of the workout - note but don't try to correct rest/recovery periods",
-    transitionStrategy: "normal state"
-  },
-  { 
-    title: "Strength Training", 
-    targetZones: [2, 3], 
-    prompt: "zone 3-4 with recovery phases at lower zones - note but don't try to correct rest/recovery periods",
-    transitionStrategy: "fixed state - MAIN_ACTIVE"
-  },
-  { 
-    title: "High Intensity", 
-    targetZones: [3, 4], 
-    prompt: "zone 4-5 primary - try to stay here for 60% of the workout; only notice drops when they exceed one minute",
-    transitionStrategy: "fixed state - MAIN_ACTIVE"
-  }
-];
 
 const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 
@@ -385,8 +347,10 @@ const App: React.FC = () => {
       let targetMinBPM = 999;
       if (currentObjective.targetZones.length > 0) {
           const minZoneIdx = Math.min(...currentObjective.targetZones);
-          if (zones[minZoneIdx]) {
-              targetMinBPM = zones[minZoneIdx].min;
+          // Adjust for 1-based indexing in objective vs 0-based in zones array
+          const zone = minZoneIdx > 0 ? zones[minZoneIdx - 1] : zones[0];
+          if (zone) {
+              targetMinBPM = zone.min;
           }
       } else {
           // Fallback if no specific zones (e.g. Wellness zone 0-1)
@@ -394,11 +358,16 @@ const App: React.FC = () => {
       }
 
       // GOAL CHECK
-      // Modified: Only Time determines "Goals Met" state transition for now.
-      const goalsMet = elapsedMinutes >= sessionDurationGoal;
+      // Use performance duration (time in MAIN_ACTIVE/BONUS_ACTIVE) instead of wall clock time
+      const performanceMinutes = performanceDurationRef.current / 60000;
+      const goalsMet = performanceMinutes >= sessionDurationGoal;
 
-      if (!goalsMet) {
-          // --- Main Workout Phase (Goals Not Met Yet) ---
+      // We are in the "Active Workout" phase if goals aren't met, 
+      // OR if we are still in WARMUP/INIT (we must finish warmup before considering goals met for state transitions)
+      const isWorkoutActive = !goalsMet || currentSessionState === SessionState.WARMUP || currentSessionState === SessionState.INIT;
+
+      if (isWorkoutActive) {
+          // --- Main Workout Phase (Goals Not Met Yet or Warming Up) ---
           
           if (currentSessionState === SessionState.WARMUP || currentSessionState === SessionState.INIT) {
               // Transition Trigger: Time > 2.0 OR HR >= TargetMin
@@ -566,7 +535,6 @@ const App: React.FC = () => {
     contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
     contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
     contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
-    contentDebug += `Goal Instructions: ${currentObjective.prompt}\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
     contentDebug += `Voice Profile: ${PERSONA_CONFIG[selectedPersona].voiceName}\n`;
@@ -867,71 +835,66 @@ const App: React.FC = () => {
   }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue]);
 
   const generateMissionProfile = useCallback(async (): Promise<string> => {
-    let targetContext = "";
-    switch (activeTargetView) {
-        case 'Time':
-            targetContext = `Target Duration: ${sessionDurationGoal} minutes`;
-            break;
-        case 'HeartPoints':
-            targetContext = `Target Heart Points: ${sessionHeartPointsGoal}`;
-            break;
-        case 'Calories':
-            targetContext = `Target Calories: ${sessionCaloriesGoal} kcal`;
-            break;
-    }
-
-    // Determine relevant states based on strategy
-    const strategy = (currentObjective as any).transitionStrategy || "normal state";
-    const isFixed = strategy.startsWith("fixed");
-    // Define states that require specific protocol instructions (excluding exceptions like ERROR/PAUSE)
-    const relevantStates = isFixed 
-        ? ["MAIN_ACTIVE", "BONUS_ACTIVE"]
-        : ["WARMUP", "MAIN_ACTIVE", "BONUS_ACTIVE", "RECOVERY"];
+    const mhr = 220 - age;
+    const buffWidth = 5;
     
-    const stateListString = relevantStates.join(', ');
-
-    const prompt = `Generate a holistic single-session mission profile for a ${age}-year-old.
-Selected Strategy: ${currentObjective.title}
-${targetContext}
-Contextual Instructions: "${currentObjective.prompt}"
-
-Requirements:
-1.  **Biometric Baselines**: Calculate Max HR (220-age) and specific BPM ranges for Zones 1–5.
-2.  **Primary Directive**: Identify the target zone(s) based on the Contextual Instructions and provide their BPM ranges. Include a +/- 3 BPM tolerance buffer where minor deviations are ignored. Explicitly restate the target time-in-zone percentage (from Contextual Instructions) required to classify the telemetry stream as 'good'.
-3.  **Phase Protocols**: Provide a specific, 1-sentence instruction for each of these session states: ${stateListString}. Define what constitutes "success" in each phase.
-4.  **Adherence Protocol**: Based on the Contextual Instructions, define the judging criteria. Instead of a binary pass/fail, provide a descriptive guideline (e.g., "Maintain target zone for 80% of the session", "Allow for transient drops during recovery", "Strict adherence required for intervals").
-5.  **Recovery Parameters**: Define a Recovery Ceiling (BPM) for rest periods.
-6.  **Safety Limits**: State the Hard Safety Redline (100% intensity).
-
-Output Style: concise, structured, and directive. This profile will serve as the "ground truth" for an AI coach analyzing live telemetry.`;
-
-    let profileText = "Standard Protocol";
-
-    try {
-        addLog(`AI_REQUEST: Generating Mission Profile (Baseline)...`);
-        addLog(`[DEBUG_MISSION_PROFILE_PROMPT] ${prompt}`); 
-        
-        const response = await generateContentWithRetry(
-            'gemini-3-flash-preview',
-            prompt,
-            undefined, // No config
-            4, // 4 Retries (Foundational)
-            'AI_MISSION_PROFILE'
-        );
-        
-        const tokenUsage = extractUsage(response);
-        profileText = response.text || "Mission profile generation failed. Using default heuristic.";
-        missionProfileRef.current = { prompt, text: profileText, tokenUsage };
-        addLog(`[MISSION_PROFILE] ${profileText}`);
-        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
-
-    } catch (e) {
-        addLog(`AI_ERROR: Mission Profile generation failed. ${e instanceof Error ? e.message : ''}`);
-        // Ensure ref is set even on failure to avoid null checks blocking state machine
-        missionProfileRef.current = { prompt, text: profileText, tokenUsage: undefined };
+    // Determine active session length for TIZ calculation
+    let sessionLength = sessionDurationGoal;
+    if (activeTargetView === 'Time') {
+        sessionLength = sessionDurationGoal;
+    } else {
+        // If not time-based, use a default or current duration? 
+        // Usually these objectives are time-based in this app.
+        sessionLength = sessionDurationGoal;
     }
+
+    const minTizMins = Math.round(0.8 * sessionLength);
+    const maxVarMins = sessionLength - minTizMins;
+
+    const z1_min = Math.round(mhr * 0.5);
+    const z1_max = Math.round(mhr * 0.6);
+    const z2_min = Math.round(mhr * 0.6);
+    const z2_max = Math.round(mhr * 0.7);
+    const z3_min = Math.round(mhr * 0.7);
+    const z3_max = Math.round(mhr * 0.8);
+    const z4_min = Math.round(mhr * 0.8);
+    const z4_max = Math.round(mhr * 0.9);
+    const z5_min = Math.round(mhr * 0.9);
+    const z5_max = mhr;
+
+    // Determine target bounds for buffer
+    // targetZones are 1-indexed in the objective definition (e.g. [2] for Zone 2)
+    const targetZoneIndices = currentObjective.targetZones.map(z => z - 1);
+    const targetMin = Math.min(...targetZoneIndices.map(i => zones[i].min));
+    const targetMax = Math.max(...targetZoneIndices.map(i => zones[i].max));
+    
+    const buffMin = Math.round(targetMin - buffWidth);
+    const buffMax = targetMax === Infinity ? mhr : Math.round(targetMax + buffWidth);
+
+    let profileText = currentObjective.mission
+      .replace(/{{MHR}}/g, mhr.toString())
+      .replace(/{{Z1_MIN}}/g, z1_min.toString())
+      .replace(/{{Z1_MAX}}/g, z1_max.toString())
+      .replace(/{{Z2_MIN}}/g, z2_min.toString())
+      .replace(/{{Z2_MAX}}/g, z2_max.toString())
+      .replace(/{{Z3_MIN}}/g, z3_min.toString())
+      .replace(/{{Z3_MAX}}/g, z3_max.toString())
+      .replace(/{{Z4_MIN}}/g, z4_min.toString())
+      .replace(/{{Z4_MAX}}/g, z4_max.toString())
+      .replace(/{{Z5_MIN}}/g, z5_min.toString())
+      .replace(/{{Z5_MAX}}/g, z5_max.toString())
+      .replace(/{{BUFF_WIDTH}}/g, buffWidth.toString())
+      .replace(/{{BUFF_MIN}}/g, buffMin.toString())
+      .replace(/{{BUFF_MAX}}/g, buffMax.toString())
+      .replace(/{{MIN_TIZ_MINS}}/g, minTizMins.toString())
+      .replace(/{{MAX_VAR_MINS}}/g, maxVarMins.toString());
+
+    addLog(`SYSTEM: Mission Profile generated locally for "${currentObjective.title}"`);
+    missionProfileRef.current = { prompt: "LOCAL_GENERATION", text: profileText, tokenUsage: undefined };
+    addLog(`[MISSION_PROFILE] ${profileText}`);
+    
     return profileText;
-  }, [age, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, addLog, generateContentWithRetry]);
+  }, [age, currentObjective, sessionDurationGoal, activeTargetView, zones, addLog]);
 
   const generateNarrativeMissionPlan = useCallback(async (profileText: string) => {
       const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1011,7 +974,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title} (${currentObjective.prompt})
+    User Goal: ${currentObjective.title}
     ${objectivesContext}
     ${narrativeContext}
     
@@ -1068,8 +1031,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
 
     const prompt = `
-    User Goal: ${currentObjective.title} (${currentObjective.prompt})
-    Current Session State: ${latestPacket.sessionState}
+    User Goal: ${currentObjective.title}
 
     Task: You are maintaining a structured "Mid-Term Memory" log of a workout session. 
     Update the EXISTING SUMMARY using the NEW TELEMETRY and TRANSITION HISTORY.
@@ -1149,7 +1111,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
 
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title} (${currentObjective.prompt})
+    User Goal: ${currentObjective.title}
     Mission Plan / Profile: ${missionProfileText}
 
     ${abstractionInstruction}
@@ -1202,7 +1164,7 @@ Output Style: concise, structured, and directive. This profile will serve as the
     const personaIdentity = personaConfig.systemInstruction;
     
     // Construct GOAL context including Mission Profile if available
-    let goalContext = `${currentObjective.title} (${currentObjective.prompt})`;
+    let goalContext = `${currentObjective.title}`;
     if (missionProfileRef.current) {
         goalContext += `\n\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}`;
     }
@@ -1398,15 +1360,21 @@ Output Style: concise, structured, and directive. This profile will serve as the
     let isCompliant = false;
     const margin = 3;
 
-    for (const targetZoneIdx of currentObjective.targetZones) {
-        const targetZone = zones[targetZoneIdx];
-        if (targetZone) {
-             const lowerBound = targetZone.min - margin;
-             const upperBound = targetZone.max === Infinity ? Infinity : targetZone.max + margin;
-             if (avgHr >= lowerBound && avgHr < upperBound) {
-                 isCompliant = true;
-                 break;
-             }
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    if (strategy === "fixed state - MAIN_ACTIVE") {
+        isCompliant = true;
+    } else {
+        for (const targetZoneIdx of currentObjective.targetZones) {
+            // Adjust for 1-based indexing in objective vs 0-based in zones array
+            const targetZone = targetZoneIdx > 0 ? zones[targetZoneIdx - 1] : zones[0];
+            if (targetZone) {
+                 const lowerBound = targetZone.min - margin;
+                 const upperBound = targetZone.max === Infinity ? Infinity : targetZone.max + margin;
+                 if (avgHr >= lowerBound && avgHr < upperBound) {
+                     isCompliant = true;
+                     break;
+                 }
+            }
         }
     }
 

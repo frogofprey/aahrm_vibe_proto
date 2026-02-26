@@ -62,6 +62,13 @@ export interface ZoneConfig {
   textClass: string;
 }
 
+export interface TrainingObjective {
+  title: string;
+  targetZones: number[];
+  mission: string;
+  transitionStrategy: string;
+}
+
 export interface PersonaConfig {
   systemInstruction: string;
   voiceName: string;
