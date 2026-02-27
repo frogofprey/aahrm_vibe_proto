@@ -34,7 +34,7 @@ async function startServer() {
   }, 1000);
 
   // API Routes
-  app.get('/api/health', (req, res) => {
+  app.get('/api/health', (req: express.Request, res: express.Response) => {
     res.json({ status: 'ok', message: 'AetherAegis Biometric Link Active' });
   });
 
@@ -47,7 +47,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
+    app.get('*', (req: express.Request, res: express.Response) => {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
   }

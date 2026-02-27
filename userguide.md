@@ -90,12 +90,12 @@ Before starting, configure your profile in the top bar. Click **"Apply & Persist
 The dashboard features distinct AI personalities to keep you motivated:
 
 *   **Arlie**: *Tactical Combat Trainer.* Treats your workout as a military defense operation. Aggressive, disciplined, hates weakness.
-    *   *Voice*: Enceladus (Deep, Authoritative)
+    *   *Voice*: Zebenelgenubi (Deep, Authoritative)
 *   **Chad**: *Competitive Gym Bro.* Treats the session as a "kill-count" competition. Uses gym slang, arrogant, dry wit.
     *   *Voice*: Algieba (Smug, Dismissive)
 *   **Ginger-Chan**: *Anime Idol.* Treats the workout as a "Boss Battle" or game. Hyper-energetic, uses gaming slang, "meow/nya" verbal tics.
     *   *Voice*: Leda (High-pitched, Manic)
-*   **Amelia**: *Nihilist Researcher.* Views your exertion as a biological curiosity. Clinical, morbid, detached.
+*   **Friday**: *Nihilist Researcher.* Views your exertion as a biological curiosity. Clinical, morbid, detached.
     *   *Voice*: Kore (Monotone, Clinical)
 *   **Kaelen**: *Gothic Fantasy.* Treats the session as a dungeon crawl or blood pact. Formal, archaic, epic metaphors.
     *   *Voice*: Sulafat (Solemn, Resonant)

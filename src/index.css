@@ -1,45 +1,48 @@
+@import "tailwindcss";
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-bg: #050505;
+  --color-card: #111111;
+  --color-cyber-green: #00ff9d;
+  --color-warning: #ff4444;
+}
 
 @layer base {
-  :root {
-    --bg-color: #050505;
-    --card-bg: #111111;
-    --accent-color: #00ff9d; /* Cyber green */
-    --warning-color: #ff4444;
-    --text-primary: #FFFFFF;
-    --text-secondary: #8E9299;
+  body {
+    @apply bg-[--color-bg] text-white font-sans;
   }
 }
 
-body {
-  background-color: var(--bg-color);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-}
+@layer components {
+  .biometric-grid {
+    background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
+    background-size: 20px 20px;
+  }
 
-.biometric-grid {
-  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.05) 1px, transparent 0);
-  background-size: 20px 20px;
-}
+  .glass-panel {
+    @apply bg-black/80 backdrop-blur-md border border-white/10;
+  }
 
-.glass-panel {
-  background: rgba(17, 17, 17, 0.8);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
+  .aether-border {
+    @apply border border-white/5 shadow-[inset_0_0_20px_rgba(0,0,0,0.5)];
+  }
 
-.scanline {
-  width: 100%;
-  height: 2px;
-  background: rgba(0, 255, 157, 0.2);
-  position: absolute;
-  top: 0;
-  left: 0;
-  animation: scan 4s linear infinite;
-  pointer-events: none;
+  .scanline {
+    @apply w-full h-[2px] bg-[--color-cyber-green]/20 absolute top-0 left-0 pointer-events-none;
+    animation: scan 4s linear infinite;
+  }
+
+  .glow-text {
+    text-shadow: 0 0 10px rgba(0, 255, 157, 0.5);
+  }
+
+  .warning-glow {
+    text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+  }
 }
 
 @keyframes scan {
@@ -47,10 +50,42 @@ body {
   100% { top: 100%; }
 }
 
-.glow-text {
-  text-shadow: 0 0 10px rgba(0, 255, 157, 0.5);
+@keyframes heartbeat {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
-.warning-glow {
-  text-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+.animate-heartbeat {
+  animation: heartbeat 1.5s ease-in-out infinite;
+}
+
+/* Basic Tailwind Animate replacements if needed */
+.animate-in {
+  animation-duration: 500ms;
+  animation-fill-mode: forwards;
+}
+
+.fade-in {
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  animation-name: fade-in;
+}
+
+.slide-in-from-top-2 {
+  @keyframes slide-in-from-top {
+    from { transform: translateY(-0.5rem); }
+    to { transform: translateY(0); }
+  }
+  animation-name: slide-in-from-top;
+}
+
+.slide-in-from-bottom-2 {
+  @keyframes slide-in-from-bottom {
+    from { transform: translateY(0.5rem); }
+    to { transform: translateY(0); }
+  }
+  animation-name: slide-in-from-bottom;
 }

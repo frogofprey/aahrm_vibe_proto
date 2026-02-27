@@ -71,6 +71,10 @@ export interface TrainingObjective {
 
 export interface PersonaConfig {
   systemInstruction: string;
+  missionProfile: string;
+  missionWeight: number;
   voiceName: string;
-  ttsInstruction: string;
+  tts13Instruction: string;
+  tts46Instruction: string;
+  tts70Instruction: string;
 }

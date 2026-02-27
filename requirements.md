@@ -40,6 +40,7 @@
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
 *   **Narrative Mission Plan**: Upon session initialization, the system must generate a "Narrative Mission Plan" using the selected Persona.
+    *   **Persona Customization**: The generation prompt incorporates the persona's specific `missionProfile` instructions to tailor the story arc.
     *   **State Transitions**: Explicitly define narrative triggers for "Warmup Completion" and "Mission Completion".
     *   **Narrative Events**: Create distinct plot points spaced at least 1 minute apart.
     *   **Integration**: The generated plan serves as the narrative arc for the AI Coach to follow during the session.
@@ -69,18 +70,24 @@
         *   Current Calories / Target Calories
         *   Compliance: X/Y **Performance Minutes**
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, Mission Profile, and **Narrative Plan**) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
+    *   **Mission Weighting**: The prompt includes the persona's `missionWeight` (0.0-1.0) to instruct the AI on how heavily to incorporate narrative elements versus raw performance data in its response.
     *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
 *   **Persona**: The AI must adopt one of the configurable personas, tailoring advice to the user's specific "Training Objective". Supported Personas:
-    *   **Arlie** (Tactical/Military, Voice: Enceladus)
+    *   **Arlie** (Tactical/Military, Voice: Zebenelgenubi)
     *   **Chad** (Competitive/Gym Bro, Voice: Algieba)
     *   **Ginger-Chan** (Anime/Gamer, Voice: Leda)
-    *   **Amelia** (Gothic/Nihilist, Voice: Kore)
+    *   **Friday** (Gothic/Nihilist, Voice: Kore)
     *   **Kaelen** (Fantasy/Noble, Voice: Sulafat)
 *   **Text-to-Speech (TTS)**: If enabled, synthesize the AI's textual insight into speech using the **Gemini TTS API** (`gemini-2.5-flash-preview-tts`).
     *   **Audio Queueing**: The system must implement an audio queue to play TTS segments sequentially, preventing overlap.
     *   **Retry Logic**: The system must attempt one retry on synthesis failure.
     *   **Quota Handling**: If a `429` (Resource Exhausted) error is received, the retry mechanism must be aborted immediately.
     *   **Chattiness Threshold**: Allow the user to set a threshold (1-10, default 4). Only AI insights with a Saliency Score greater than or equal to this threshold will trigger TTS.
+    *   **Salience-Based Delivery**: TTS instructions are split into three tiers based on the Saliency Score:
+        *   **Score 1-3**: Low intensity/routine delivery.
+        *   **Score 4-6**: Mid intensity/notable trend delivery.
+        *   **Score 7-10**: High intensity/critical alert delivery.
+        *   **System Reports**: Introduction and Final Session Reports always use the mid-intensity (Score 4-6) delivery style.
 
 ### 1.5 Configuration & Persistence
 *   **User Settings**: Allow users to configure:

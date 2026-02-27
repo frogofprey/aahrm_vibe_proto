@@ -1,4 +1,4 @@
-import { TrainingObjective } from './types.ts';
+import { TrainingObjective } from './types';
 
 export const TRAINING_OBJECTIVES: TrainingObjective[] = [
   {
