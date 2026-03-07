@@ -1158,9 +1158,13 @@ const App: React.FC = () => {
         );
         
         const tokenUsage = extractUsage(response);
+        const llmModel = 'gemini-3-flash-preview';
+        const ttsModel = 'gemini-2.5-flash-preview-tts';
         const reportText = response.text || "Session concluded. Data saved.";
-        finalSessionReportRef.current = { prompt, text: reportText, tokenUsage };
-        setFinalReportText(reportText); // Update State for UI
+        const fullReportText = `${reportText}\n\nLLM Model: ${llmModel}\nTTS Model: ${ttsModel}`;
+        
+        finalSessionReportRef.current = { prompt, text: fullReportText, tokenUsage };
+        setFinalReportText(fullReportText); // Update State for UI
         addLog(`[FINAL_REPORT] ${reportText}`);
         if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 

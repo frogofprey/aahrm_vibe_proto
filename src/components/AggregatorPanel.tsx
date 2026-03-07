@@ -36,7 +36,7 @@ const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText,
                </div>
                <div className="flex items-start gap-3">
                    <div className="text-[9px] uppercase font-black text-emerald-600 tracking-tighter bg-emerald-500/10 px-1.5 py-0.5 mt-0.5">FINAL_DIAGNOSTIC</div>
-                   <p className="text-[11px] text-emerald-100/90 leading-relaxed italic">
+                   <p className="text-[11px] text-emerald-100/90 leading-relaxed italic whitespace-pre-wrap">
                        {finalReportText}
                    </p>
                </div>

@@ -19,15 +19,16 @@ The application primarily utilizes two models via the Google GenAI SDK:
 
 These calls occur immediately after the user clicks **"START SESSION"**.
 
-### A. Mission Profile Generator
+### A. Mission Profile Generator (Local)
 *   **Trigger**: Immediate upon session start.
-*   **Purpose**: Establishes the "Ground Truth" for the session. It calculates specific heart rate targets and defines success criteria based on the user's age and selected objective.
+*   **Purpose**: Establishes the "Ground Truth" for the session. It calculates specific heart rate targets and defines success criteria based on the user's age and selected objective using a predefined template.
 *   **Dependencies**: None.
+*   **Implementation**: Local logic in `App.tsx` using templates from `training_objectives.ts`.
 *   **Context/Input**: 
     *   User Age (for Max HR calculation).
     *   Selected Objective (e.g., "Weight Loss").
     *   Target Strategy (Duration/Heart Points/Calories).
-*   **Output**: A structured text block defining Zone ranges and Phase protocols.
+*   **Output**: A structured text block defining Zone ranges and Phase protocols (e.g., "PRIMARY DIRECTIVE", "PHASE PROTOCOLS").
 
 ### B. Narrative Mission Plan
 *   **Trigger**: Automatically called **after** the *Mission Profile* is successfully generated.
@@ -37,7 +38,8 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Selected Persona (System Instruction).
     *   Mission Profile text.
     *   Session Duration.
-*   **Output**: A timeline of narrative events (e.g., "At 5 minutes, enemy reinforcements arrive") and thematic context.
+*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting.
+*   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[CONCLUSION]`, `[OVERTIME]`).
 
 ### C. Session Intro
 *   **Trigger**: Called after the Mission Plan is generated.
@@ -123,9 +125,8 @@ sequenceDiagram
     Note over User, App: 1. INITIALIZATION
     User->>App: Click "Start Session"
     activate App
-    App->>Flash: Generate Mission Profile
-    Flash-->>App: Profile Text (Ground Truth)
-    App->>Flash: Generate Narrative Plan (uses Profile)
+    App->>App: Generate Mission Profile (Local Template)
+    App->>Flash: Generate Narrative Plan (uses Profile & Template)
     Flash-->>App: Narrative Context
     App->>Flash: Generate Session Intro
     Flash-->>App: Intro Text
