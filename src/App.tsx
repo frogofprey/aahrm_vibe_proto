@@ -113,16 +113,16 @@ PII Isolation: Do not attempt to guess the user's age or identity. Use the provi
 Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
-Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on completed phases and timeline events when appropriate. attempt to 'front load' information on current state (above, below, on) target heart rate zones in order to make the output very clear for the user this is especially important for major corrections. 
+Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on completed phases and timeline events when appropriate. attempt to front load information on current state (above, below, on) target heart rate zones in order to make the output very clear for the user this is especially important for major corrections. 
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
-Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data and to highlight workout milestones. 
+Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
-4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target. 
-7-10: Critical breach, safety alert. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
+4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target.
+7-10: Critical breach, safety alert, or major mission milestone. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
 Output format: Score: [X] | [Analysis Text]
 STRICT FORMATTING: Your response MUST start with "Score: [X] |". Do not include any other text, markdown, or headers before this.
-Goal: Provide a concise (1-sentence) insight after each packet that helps to guide the user towards specific objective and provides relevant milestone data according to the mission plan, formatted strictly as requested.`;
+Goal: Provide a concise (1-sentence) insight after each packet that helps the user optimize their current session for their specific objective, formatted strictly as requested.`;
 
 const App: React.FC = () => {
   // --- Persistent State Initialization ---
