@@ -104,7 +104,7 @@ const HR_MAX_VALID = 220;
 
 const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 
-const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless critically necessary for safety (Score 7+). Instead, use qualitative descriptors (e.g., "surging," "drifting lower," "holding the line").`;
+const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless critically necessary for safety (Score 7+). Instead, use qualitative descriptors appropriate for your personality and the mission.`;
 
 const BASE_SYSTEM_INSTRUCTION = `
 Data Input: You will receive "Minute Packets" containing an array of raw BPM samples, an average, and a Max/Min.
@@ -113,16 +113,16 @@ PII Isolation: Do not attempt to guess the user's age or identity. Use the provi
 Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
-Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on completed phases and timeline events when appropriate. attempt to front load information on current state (above, below, on) target heart rate zones in order to make the output very clear for the user this is especially important for major corrections. 
+Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on state changes and completed milestone events when appropriate. Attempt to front load information on current heart rate (above, below, on) target heart rate zones in order to make the output very clear for the user. This is especially important for major corrections (more than 1 zone away from target). If correction and a milestone appear in the same update, comment on each separately, starting with the correction. Use the time in the [OBJECTIVE STATUS TRACKER] for reporting milestones, not the CURRENT MINUTE PACKET tag as that will also include warmup time. 
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
 4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target.
-7-10: Critical breach, safety alert, or major mission milestone. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
+7-10: Critical breach or safety alert. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
 Output format: Score: [X] | [Analysis Text]
 STRICT FORMATTING: Your response MUST start with "Score: [X] |". Do not include any other text, markdown, or headers before this.
-Goal: Provide a concise (1-sentence) insight after each packet that helps the user optimize their current session for their specific objective, formatted strictly as requested.`;
+Goal: Provide a concise insight after each packet that helps the user optimize thier current session for thier specific objective, formatted strictly as requested. If a mission milestone has been reached, ensure that the user is made aware.`;
 
 const App: React.FC = () => {
   // --- Persistent State Initialization ---
@@ -908,7 +908,7 @@ const App: React.FC = () => {
       const duration = sessionDurationGoal;
       
       const prompt = `
-      Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide the session's story arc.
+      You are an expert author/Narrative creator. Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. 
       
       Persona: ${personaConfig.systemInstruction}
       Persona Mission Instruction: ${personaConfig.missionProfile}
@@ -916,25 +916,27 @@ const App: React.FC = () => {
       Session Duration: ${duration} minutes.
       
       Requirements:
-      1. Recontextualize the workout goals into the persona's thematic world. Use the persona's instruction to guide the theme, but don't speak in thier voice for this output. 
-      2. Define specific Narrative Events/Plot Points triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. 
-      3. Define a "Mission Complete" narrative conclusion (Goals Met).
-      4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state).
+      1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
+      2. Define specific Milestones/Narrative events triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. Incorporate planned state transitions into the plan as best as is possible. 
+      3. Define a "Mission Complete" narrative conclusion (Goals Met). Generate a Maguffin for the persona to use narratively. 
+      4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
       
-      Output Format:
+      Output Format: (based on Steady State 'walking')
       [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
 
       [TIMELINE]:
-       0:00 [The Loading Screen]: user is getting ready to engage
-       5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user
-      10:00 [The Mid-Boss Grind]: Boss at half health - stamina check 
-      15:00 [Final Stages]: Boss desperate and uses his sisal shield
-      18:00 [Final Phase / Enrage Timer]: Boss on last legs and desperate, more power to the laser; pounce protocol active. 
-      20:00 [Final Phase / Enrage Timer]: Boss defeated; time to celebrate the victory
-
-      [CONCLUSION]:	VICTORY! the Golden Yarn trophy is yours!
-
-      [OVERTIME]:	SECRET STAGE UNLOCKED! the Golden Yarn trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
+      WARMUP [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
+      MAIN_ACTIVE
+       +2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
+       +5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
+      +10:00 [Encounter Midpoint]: Boss at half health - stamina check 
+      +15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
+      +18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
+      +20:00 [Boss Down]: Boss defeated; time to celebrate the victory
+      [Mission Complete]:	VICTORY! the Golden Yarn Trophy is yours!
+      [Maguffin]: Golden Yarn Trophy
+      BONUS_ACTIVE
+      [BONUS]:	SECRET STAGE UNLOCKED! the Golden Yarn Trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
       `;
 
       try {
@@ -995,9 +997,9 @@ const App: React.FC = () => {
     
     ${abstractionInstruction}
 
-    Task: The user has just started a workout session. Generate a single, short, motivating sentence to initiate the session.
+    Task: The user has just started a workout session. Generate an introduction to initiate the session.
     Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately.
-    Constraint: Maximum 25 words. Strictly adhere to persona.
+    Constraint: Strictly adhere to persona.
     `;
 
     try {
@@ -1133,7 +1135,7 @@ const App: React.FC = () => {
     ${abstractionInstruction}
 
     Task: The workout session has ended. Generate a final session report based on the context below.
-    Constraints: Maximum 2 sentences. Professional, summary-focused, and concluding.
+    Constraints: Professional, summary-focused, and concluding. Be generaous with the ending workout stats. 
     
     Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM, Calories ${totalCalories.toFixed(0)}, Heart Points ${totalPoints}.
     Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
@@ -1490,8 +1492,8 @@ const App: React.FC = () => {
       };
 
       ws.onmessage = (event) => {
+        const rawMsg = event.data.toString();
         try {
-          const rawMsg = event.data.toString();
           const rawData = JSON.parse(rawMsg);
           const rawHR = rawData.hr !== undefined ? rawData.hr : (rawData.data?.hr);
           const numericHR = typeof rawHR === 'number' ? rawHR : Number(rawHR);
@@ -1535,11 +1537,11 @@ const App: React.FC = () => {
               return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
             });
 
-          } else if (numericHR !== undefined && numericHR !== null) {
-            addLog(`WARNING: Biometric Noise Filtered [${numericHR} BPM]`);
+          } else {
+            addLog(`UPLINK: ${rawMsg}`);
           }
         } catch (e) {
-          addLog(`ERROR: Telemetry parsing failed.`);
+          addLog(`UPLINK: ${rawMsg}`);
         }
       };
 
