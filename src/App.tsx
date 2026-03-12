@@ -49,6 +49,13 @@ function formatDuration(ms: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function formatMMSS(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
 // --- Text Cleaning Utility ---
 function cleanInsightText(text: string): string {
   // Removes "Score: [X] | " or "Score: X | " prefix case-insensitively
@@ -113,16 +120,18 @@ PII Isolation: Do not attempt to guess the user's age or identity. Use the provi
 Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
-Goal: feedback should be based on the current phase/state objective as specified by the following mission plan and the narrative mission plan which also follows. The current phase/state is shown in the objective block. Be sure to remark on state changes and completed milestone events when appropriate. Attempt to front load information on current heart rate (above, below, on) target heart rate zones in order to make the output very clear for the user. This is especially important for major corrections (more than 1 zone away from target). If correction and a milestone appear in the same update, comment on each separately, starting with the correction. Use the time in the [OBJECTIVE STATUS TRACKER] for reporting milestones, not the CURRENT MINUTE PACKET tag as that will also include warmup time. 
+Corrections: the input telemetry will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified redline or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. 
+Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. If a milestone is relevant for this update, then put the tag from the brackets [] at the end of the message (debug). 
+Goal: The current state is shown in the objective block. Be sure to remark on state changes when appropriate. In general an update will consiste of a Correction followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the correction should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this. Ensure that pace steering advice is not contradicted by milestone updates.  
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
-4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target.
+4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target. Reserve score 6 for narrative only updates. 
 7-10: Critical breach or safety alert. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
 Output format: Score: [X] | [Analysis Text]
 STRICT FORMATTING: Your response MUST start with "Score: [X] |". Do not include any other text, markdown, or headers before this.
-Goal: Provide a concise insight after each packet that helps the user optimize thier current session for thier specific objective, formatted strictly as requested. If a mission milestone has been reached, ensure that the user is made aware.`;
+`;
 
 const App: React.FC = () => {
   // --- Persistent State Initialization ---
@@ -168,6 +177,7 @@ const App: React.FC = () => {
   const [currentSessionState, setCurrentSessionState] = useState<SessionState>(SessionState.IDLE);
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const [elapsedTime, setElapsedTime] = useState("00:00:00");
+  const [activeTime, setActiveTime] = useState("00:00");
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [introText, setIntroText] = useState<string | null>(null);
   const [finalReportText, setFinalReportText] = useState<string | null>(null);
@@ -184,7 +194,8 @@ const App: React.FC = () => {
   
   // Refs
   const currentMinuteRef = useRef<number[]>([]);
-  const nextSummaryTimeRef = useRef<number>(0);
+  const lastUpdateWallTimeRef = useRef<number>(0);
+  const nextActiveTargetRef = useRef<number>(60000);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
   const sessionActiveRef = useRef(isSessionActive); // Mirror for WS callback
@@ -192,7 +203,11 @@ const App: React.FC = () => {
   
   // Objective Time Ref (Only increments in performance states)
   const performanceDurationRef = useRef(0);
+  const activeDurationRef = useRef(0);
+  const hasStartedActiveRef = useRef(false);
   const lastPerformanceTickRef = useRef<number>(0);
+  const pendingAiMarkerRef = useRef(false);
+  const workerRef = useRef<Worker | null>(null);
   
   // Session Metrics Refs
   const runningMetricsRef = useRef<{ heartPoints: number; calories: number; compliantMinutes: number; performanceMinutes: number }>({ heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 });
@@ -291,7 +306,15 @@ const App: React.FC = () => {
         // Log to System Console
         addLog(`STATE_CHANGE: ${msg}`);
         
+        // Trigger Active Timer on first transition to MAIN_ACTIVE
+        if (newState === SessionState.MAIN_ACTIVE && !hasStartedActiveRef.current) {
+            hasStartedActiveRef.current = true;
+            nextActiveTargetRef.current = 0; // Trigger immediate update at 0:00 active time (respecting 30s cooldown)
+            addLog(`SYSTEM: Active Timer Engaged.`);
+        }
+
         // Update Actual State
+        currentSessionStateRef.current = newState;
         setCurrentSessionState(newState);
     }
   }, [addLog]);
@@ -465,24 +488,97 @@ const App: React.FC = () => {
 
   }, [isSessionActive, status, currentObjective, sessionStartTime, zones, activeTargetView, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, currentSessionState, transitionState]);
 
-  // Performance Duration Timer
+  // Performance Duration Timer (Web Worker based to prevent background throttling)
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
     if (isSessionActive) {
+        // Create worker blob for a reliable background timer
+        const workerCode = `
+            let timer = null;
+            self.onmessage = function(e) {
+                if (e.data === 'start') {
+                    if (timer) clearInterval(timer);
+                    timer = setInterval(() => {
+                        self.postMessage('tick');
+                    }, 100);
+                } else if (e.data === 'stop') {
+                    if (timer) clearInterval(timer);
+                    timer = null;
+                }
+            };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+        const worker = new Worker(workerUrl);
+        workerRef.current = worker;
+
         lastPerformanceTickRef.current = Date.now();
-        interval = setInterval(() => {
+        
+        worker.onmessage = () => {
             const now = Date.now();
             const delta = now - lastPerformanceTickRef.current;
             lastPerformanceTickRef.current = now;
             
             // Only increment active performance time if in valid states (MAIN_ACTIVE, BONUS_ACTIVE)
-            // Explicitly exclude WARMUP, RECOVERY, PAUSE, INIT from the "Goal Timer"
             if (currentSessionState === SessionState.MAIN_ACTIVE || currentSessionState === SessionState.BONUS_ACTIVE) {
                 performanceDurationRef.current += delta;
             }
-        }, 100); 
+
+            // Active Timer: Accumulate time when active and not paused
+            if (hasStartedActiveRef.current && currentSessionState !== SessionState.PAUSE) {
+                activeDurationRef.current += delta;
+            }
+
+            // --- AI SYNC TRIGGER LOGIC (High Resolution) ---
+            let isAiTrigger = false;
+            const timeSinceLastUpdate = now - lastUpdateWallTimeRef.current;
+            const currentActiveTime = activeDurationRef.current;
+
+            if (hasStartedActiveRef.current) {
+                // Active mode: follow active clock targets ONLY
+                if (currentActiveTime >= nextActiveTargetRef.current) {
+                    isAiTrigger = true;
+                }
+            } else {
+                // Pre-active: follow wall clock
+                if (timeSinceLastUpdate >= 60000) {
+                    isAiTrigger = true;
+                }
+            }
+
+            // Safety: Never fire more than once every 30 seconds
+            if (isAiTrigger && timeSinceLastUpdate < 30000) {
+                if (showSystemLogs && isAiTrigger) {
+                    addLog(`DEBUG: AI Update suppressed (Cooldown: ${Math.round(timeSinceLastUpdate/1000)}s)`);
+                }
+                isAiTrigger = false;
+            }
+
+            // Only trigger if we have data to analyze
+            if (isAiTrigger) {
+                const hasData = currentMinuteRef.current.length > 0;
+                lastUpdateWallTimeRef.current = now;
+                // Advance active target if we are in active mode
+                if (hasStartedActiveRef.current) {
+                    nextActiveTargetRef.current = (Math.floor(currentActiveTime / 60000) + 1) * 60000;
+                }
+                
+                // Trigger calculation and AI call if we have data
+                if (hasData && calcRef.current) {
+                    pendingAiMarkerRef.current = true;
+                    calcRef.current();
+                }
+            }
+        };
+
+        worker.postMessage('start');
+
+        return () => {
+            worker.postMessage('stop');
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            workerRef.current = null;
+        };
     }
-    return () => clearInterval(interval);
   }, [isSessionActive, currentSessionState]);
 
   // Wall Clock Timer Effect
@@ -491,6 +587,11 @@ const App: React.FC = () => {
     if (isSessionActive && sessionStartTime) {
       interval = setInterval(() => {
         setElapsedTime(formatDuration(Date.now() - sessionStartTime));
+        if (hasStartedActiveRef.current) {
+            setActiveTime(formatMMSS(activeDurationRef.current));
+        } else {
+            setActiveTime("00:00");
+        }
       }, 1000);
     }
     return () => clearInterval(interval);
@@ -534,7 +635,7 @@ const App: React.FC = () => {
     contentDebug += `OBJECTIVES: ${activeObjectiveStr}\n`;
     contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
     contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
-    contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
+    contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
     contentDebug += `Voice Profile: ${PERSONA_CONFIG[selectedPersona].voiceName}\n`;
@@ -637,7 +738,7 @@ const App: React.FC = () => {
     contentUser += `Objectives: ${activeObjectiveStr}\n`;
     contentUser += `Total Calories: ${totalCalories.toFixed(1)} kcal\n`;
     contentUser += `Total Heart Points: ${totalPoints}\n`;
-    contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} active minutes\n`;
+    contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} active minutes\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
 
@@ -925,17 +1026,15 @@ const App: React.FC = () => {
       [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
 
       [TIMELINE]:
-      WARMUP [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
-      MAIN_ACTIVE
-       +2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
-       +5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
-      +10:00 [Encounter Midpoint]: Boss at half health - stamina check 
-      +15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
-      +18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
-      +20:00 [Boss Down]: Boss defeated; time to celebrate the victory
+       0:00 [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
+       2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
+       5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
+      10:00 [Encounter Midpoint]: Boss at half health - stamina check 
+      15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
+      18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
+      20:00 [Boss Down]: Boss defeated; time to celebrate the victory
       [Mission Complete]:	VICTORY! the Golden Yarn Trophy is yours!
       [Maguffin]: Golden Yarn Trophy
-      BONUS_ACTIVE
       [BONUS]:	SECRET STAGE UNLOCKED! the Golden Yarn Trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
       `;
 
@@ -1127,6 +1226,9 @@ const App: React.FC = () => {
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
 
+    const activeDurationStr = formatMMSS(activeDurationRef.current);
+    const activeMinutes = (activeDurationRef.current / 60000).toFixed(1);
+
     const prompt = `
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title}
@@ -1135,9 +1237,23 @@ const App: React.FC = () => {
     ${abstractionInstruction}
 
     Task: The workout session has ended. Generate a final session report based on the context below.
-    Constraints: Professional, summary-focused, and concluding. Be generaous with the ending workout stats. 
     
-    Session Stats: Duration ${finalDuration}, Avg HR ${avgHr} BPM, Peak HR ${peakHr} BPM, Calories ${totalCalories.toFixed(0)}, Heart Points ${totalPoints}.
+    Constraints: 
+    - Professional, summary-focused, and concluding. 
+    - Be generous with the ending workout stats. 
+    - Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time).
+    - Use the 'Active Duration' (${activeMinutes} mins) as the primary reference for workout intensity and milestone timing.
+    - Provide a narrative arc that reflects the user's performance from start to finish.
+    - Include a final word of encouragement or a "mission debrief" summary.
+    
+    Session Stats: 
+    - Total Wall Time: ${finalDuration}
+    - Active Workout Time: ${activeDurationStr} (${activeMinutes} mins)
+    - Avg HR: ${avgHr} BPM
+    - Peak HR: ${peakHr} BPM
+    - Calories: ${totalCalories.toFixed(0)}
+    - Heart Points: ${totalPoints}
+    
     Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
     
     Session State Timeline:
@@ -1243,6 +1359,10 @@ const App: React.FC = () => {
     // Calculate performance time in minutes for display context (Ignoring warmup/recovery)
     const currentPerformanceMinutes = (performanceDurationRef.current / 60000).toFixed(1);
     
+    // Timer Context
+    const activeTimeStr = formatMMSS(activeDurationRef.current);
+    const timerContext = `[CURRENT TIMERS]\nActive_Time: ${activeTimeStr}`;
+
     let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n`;
     if (activeTargetView === 'Time') {
         objectiveStatus += `- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
@@ -1254,7 +1374,7 @@ const App: React.FC = () => {
     
     // Total Denominator for compliance should only include performance-active minutes
     const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
-    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes}/${totalPerformanceMinutes} performance minutes in target zone`;
+    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${totalPerformanceMinutes.toFixed(1)} performance minutes in target zone`;
     objectiveStatus += `\n(System Context: Use the following metrics as the factual foundation for your observations. Translate these values into your persona's voice—focus on the 'State of the Mission' rather than the raw digits. Do not replicate the list format; simply internalize the data to inform your judgment.)`;
     
     // Append objective status to the memory context block (or create if empty)
@@ -1262,7 +1382,8 @@ const App: React.FC = () => {
     memoryContext += `[CURRENT SESSION STATE]: ${summary.sessionState}\n\n`; // Use the frame-based session state
 
 
-    const prompt = `${tailoredSystemInstruction}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET (Minute ${currentIndex + 1}):\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]`;
+    const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
@@ -1426,8 +1547,9 @@ const App: React.FC = () => {
     const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || effectiveFrameState === SessionState.BONUS_ACTIVE;
     
     if (isPerformanceState) {
-        runningMetricsRef.current.performanceMinutes += 1; // Increment denominator for active minutes
-        if (isCompliant) runningMetricsRef.current.compliantMinutes += 1;
+        const minutesElapsed = values.length / 60;
+        runningMetricsRef.current.performanceMinutes += minutesElapsed; // Increment denominator for active minutes
+        if (isCompliant) runningMetricsRef.current.compliantMinutes += minutesElapsed;
     }
 
     const newSummary: MinuteSummary = {
@@ -1505,30 +1627,22 @@ const App: React.FC = () => {
                 updateStateRef.current(numericHR);
             }
 
-            const currentState = currentSessionStateRef.current;
             const newData: HeartRateData = {
               hr: numericHR,
               timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              isAiRequest: false
+              isAiRequest: pendingAiMarkerRef.current
             };
             
-            // AI SYNC TRIGGER LOGIC
-            let isAiTrigger = false;
+            if (pendingAiMarkerRef.current) {
+                pendingAiMarkerRef.current = false;
+            }
+            
             if (sessionActiveRef.current) {
                 currentMinuteRef.current.push(numericHR);
-                
-                // Check wall clock time against next summary target
-                const now = Date.now();
-                if (now >= nextSummaryTimeRef.current) {
-                    isAiTrigger = true;
-                    newData.isAiRequest = true; // Mark point on chart
-                    calcRef.current(); // Generate summary
-                    nextSummaryTimeRef.current += 60000; // Advance target
-                }
             }
 
             if (showRawTelemetryRef.current) {
-              addLog(`TELEMETRY: ${numericHR} BPM ${isAiTrigger ? '[AI_SYNC]' : ''} | RAW: ${rawMsg}`);
+              addLog(`TELEMETRY: ${numericHR} BPM | RAW: ${rawMsg}`);
             }
             
             setCurrentHR(numericHR);
@@ -1613,7 +1727,12 @@ const App: React.FC = () => {
     transitionTimersRef.current = { warmupToMain: null, bonusToRecovery: null, mainToPause: null, pauseToMain: null };
     setIntroText(null);
     setElapsedTime("00:00:00");
+    setActiveTime("00:00");
     performanceDurationRef.current = 0; // Reset Performance Duration
+    activeDurationRef.current = 0;
+    hasStartedActiveRef.current = false;
+    lastUpdateWallTimeRef.current = 0;
+    nextActiveTargetRef.current = 60000;
     setTimeout(connect, 300);
   }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled]);
 
@@ -1674,9 +1793,13 @@ const App: React.FC = () => {
 
       setSessionStartTime(now);
       setElapsedTime("00:00:00");
+      setActiveTime("00:00");
       runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 }; // Reset metrics
       performanceDurationRef.current = 0; // Reset performance duration
-      nextSummaryTimeRef.current = now + 60000; // Exact 1 min delta
+      activeDurationRef.current = 0;
+      hasStartedActiveRef.current = false;
+      lastUpdateWallTimeRef.current = now;
+      nextActiveTargetRef.current = 60000;
       setIntroText(null);
       transitionTimersRef.current = { warmupToMain: null, bonusToRecovery: null, mainToPause: null, pauseToMain: null };
       
@@ -1923,6 +2046,7 @@ const App: React.FC = () => {
               hr={currentHR} 
               zone={currentZone} 
               elapsedTime={elapsedTime} 
+              activeTime={activeTime}
               latestInsight={latestInsightCleaned}
               isFullScreen={isFullScreen}
             />

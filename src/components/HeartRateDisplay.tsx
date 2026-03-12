@@ -5,11 +5,12 @@ interface HeartRateDisplayProps {
   hr: number | null;
   zone: ZoneConfig | null;
   elapsedTime: string;
+  activeTime: string;
   latestInsight?: string;
   isFullScreen?: boolean;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, latestInsight, isFullScreen }) => {
+const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, activeTime, latestInsight, isFullScreen }) => {
   const displayValue = hr !== null ? hr : '--';
   
   // Neutral fallbacks for when no zone is matched or no data is present
@@ -63,6 +64,14 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
         <div className={`text-xl font-mono font-bold tracking-widest ${elapsedTime !== "00:00:00" ? 'text-white' : 'text-slate-600'}`}>
             {elapsedTime}
         </div>
+        {activeTime !== "00:00" && (
+          <div className="mt-2 flex flex-col items-center">
+            <span className="text-[9px] text-cyan-500/70 uppercase tracking-[0.2em] mb-1">Active Time</span>
+            <div className="text-2xl font-mono font-bold tracking-widest text-cyan-400">
+                {activeTime}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Full Screen Insight Overlay */}
