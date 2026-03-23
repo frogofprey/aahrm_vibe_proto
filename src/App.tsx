@@ -59,7 +59,11 @@ function formatMMSS(ms: number): string {
 // --- Text Cleaning Utility ---
 function cleanInsightText(text: string): string {
   // Removes "Score: [X] | " or "Score: X | " prefix case-insensitively
-  return text.replace(/^Score:\s*\[?[\d.]+\]?\s*\|\s*/i, '').trim();
+  // AND removes any trailing [debug info] blocks in brackets
+  return text
+    .replace(/^Score:\s*\[?[\d.]+\]?\s*\|\s*/i, '')
+    .replace(/(\s*\[[^\]]*\]\s*)+$/, '')
+    .trim();
 }
 
 // --- Token Usage Extraction Utility ---
@@ -82,8 +86,6 @@ const ENV_DEVICE_HEX = (process.env as any).DEVICE_ID || '00:00:00:00:00:00';
 const ENV_DEFAULT_AGE = parseInt((process.env as any).DEFAULT_AGE || '30');
 const ENV_DEFAULT_WEIGHT = parseInt((process.env as any).DEFAULT_WEIGHT || '150');
 const ENV_DEFAULT_DURATION = parseInt((process.env as any).DEFAULT_DURATION || '20');
-const ENV_DEFAULT_HP_GOAL = parseInt((process.env as any).DEFAULT_HP_GOAL || '30');
-const ENV_DEFAULT_CAL_GOAL = parseInt((process.env as any).DEFAULT_CAL_GOAL || '100');
 const ENV_DEFAULT_CHATTINESS = parseInt((process.env as any).DEFAULT_CHATTINESS || '4');
 
 const STORAGE_KEYS = {
@@ -94,8 +96,6 @@ const STORAGE_KEYS = {
   GENDER: 'aetheraegis_subject_gender',
   GOAL: 'aetheraegis_training_goal',
   DURATION: 'aetheraegis_session_duration',
-  HP_GOAL: 'aetheraegis_hp_goal',
-  CAL_GOAL: 'aetheraegis_cal_goal',
   VOICE: 'aetheraegis_voice_enabled',
   PERSONA: 'aetheraegis_ai_persona',
   CHATTINESS: 'aetheraegis_chattiness',
@@ -148,9 +148,6 @@ const App: React.FC = () => {
   
   // Session Objectives
   const [sessionDurationGoal, setSessionDurationGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.DURATION) || String(ENV_DEFAULT_DURATION)));
-  const [sessionHeartPointsGoal, setSessionHeartPointsGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.HP_GOAL) || String(ENV_DEFAULT_HP_GOAL)));
-  const [sessionCaloriesGoal, setSessionCaloriesGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CAL_GOAL) || String(ENV_DEFAULT_CAL_GOAL)));
-  const [activeTargetView, setActiveTargetView] = useState<'Time' | 'HeartPoints' | 'Calories'>('Time');
 
   const [isVoiceEnabled, setIsVoiceEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.VOICE) === 'true');
   // Default to Arlie if stored persona is invalid or missing
@@ -184,6 +181,9 @@ const App: React.FC = () => {
 
   const [dataPoints, setDataPoints] = useState<HeartRateData[]>([]);
   const [currentHR, setCurrentHR] = useState<number | null>(null);
+  const [hrTrend, setHrTrend] = useState<string>("Stable");
+  const hrHistoryRef = useRef<{ hr: number; timestamp: number }[]>([]);
+  const smoothedHRRef = useRef<number | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<{ id: number; message: string; timestamp: string }[]>([]);
@@ -191,6 +191,7 @@ const App: React.FC = () => {
   const [showRawTelemetry, setShowRawTelemetry] = useState(false);
   
   const [summaries, setSummaries] = useState<MinuteSummary[]>([]);
+  const [intervalCount, setIntervalCount] = useState(0);
   
   // Refs
   const currentMinuteRef = useRef<number[]>([]);
@@ -313,11 +314,20 @@ const App: React.FC = () => {
             addLog(`SYSTEM: Active Timer Engaged.`);
         }
 
+        // Interval State Strategy: Increment count on MAIN_ACTIVE -> RECOVERY
+        const strategy = (currentObjective as any).transitionStrategy || "normal state";
+        if (strategy === "interval state") {
+            if (currentSessionStateRef.current === SessionState.MAIN_ACTIVE && newState === SessionState.RECOVERY) {
+                setIntervalCount(prev => prev + 1);
+                addLog(`SYSTEM: Interval ${intervalCount + 1} completed.`);
+            }
+        }
+
         // Update Actual State
         currentSessionStateRef.current = newState;
         setCurrentSessionState(newState);
     }
-  }, [addLog]);
+  }, [addLog, currentObjective, intervalCount]);
 
   // --- State Machine Logic ---
   const updateSessionState = useCallback((currentBPM: number | null) => {
@@ -359,7 +369,66 @@ const App: React.FC = () => {
           return;
       }
 
-      // 6. Normal Strategy Logic
+      // 6. Interval Strategy Logic
+      if (strategy === "interval state") {
+          const now = Date.now();
+          const elapsedMs = now - (sessionStartTime || now);
+          const elapsedMinutes = elapsedMs / 60000;
+          
+          let targetMinBPM = 999;
+          if (currentObjective.targetZones.length > 0) {
+              const minZoneIdx = Math.min(...currentObjective.targetZones);
+              const zone = minZoneIdx > 0 ? zones[minZoneIdx - 1] : zones[0];
+              if (zone) targetMinBPM = zone.min;
+          }
+
+          if (currentSessionState === SessionState.INIT || currentSessionState === SessionState.WARMUP) {
+              // Warmup to Main Active
+              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+              if (isWarmupComplete) {
+                  if (!transitionTimersRef.current.warmupToMain) {
+                      transitionTimersRef.current.warmupToMain = now;
+                  } else if (now - transitionTimersRef.current.warmupToMain > 5000) {
+                      transitionState(SessionState.MAIN_ACTIVE, "Warmup targets met (Interval Strategy)");
+                      transitionTimersRef.current.warmupToMain = null;
+                  }
+              } else {
+                  transitionTimersRef.current.warmupToMain = null;
+                  if (currentSessionState === SessionState.INIT && elapsedMinutes > 0.1) {
+                      transitionState(SessionState.WARMUP, "Initialization complete");
+                  }
+              }
+          } else if (currentSessionState === SessionState.MAIN_ACTIVE) {
+              // Main Active to Recovery (Valley)
+              const isDrop = (currentBPM || 0) < targetMinBPM;
+              if (isDrop) {
+                  if (!transitionTimersRef.current.mainToPause) {
+                      transitionTimersRef.current.mainToPause = now;
+                  } else if (now - transitionTimersRef.current.mainToPause > 10000) { // 10s debounce for interval drop
+                      transitionState(SessionState.RECOVERY, "HR below target (Interval Valley)");
+                      transitionTimersRef.current.mainToPause = null;
+                  }
+              } else {
+                  transitionTimersRef.current.mainToPause = null;
+              }
+          } else if (currentSessionState === SessionState.RECOVERY) {
+              // Recovery to Main Active (Spike)
+              const isSpike = (currentBPM || 0) >= targetMinBPM;
+              if (isSpike) {
+                  if (!transitionTimersRef.current.pauseToMain) {
+                      transitionTimersRef.current.pauseToMain = now;
+                  } else if (now - transitionTimersRef.current.pauseToMain > 5000) {
+                      transitionState(SessionState.MAIN_ACTIVE, "HR recovered to target (Interval Spike)");
+                      transitionTimersRef.current.pauseToMain = null;
+                  }
+              } else {
+                  transitionTimersRef.current.pauseToMain = null;
+              }
+          }
+          return;
+      }
+
+      // 7. Normal Strategy Logic
       // Calculations
       const now = Date.now();
       const elapsedMs = now - (sessionStartTime || now);
@@ -486,7 +555,7 @@ const App: React.FC = () => {
           }
       }
 
-  }, [isSessionActive, status, currentObjective, sessionStartTime, zones, activeTargetView, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, currentSessionState, transitionState]);
+  }, [isSessionActive, status, currentObjective, sessionStartTime, zones, sessionDurationGoal, currentSessionState, transitionState]);
 
   // Performance Duration Timer (Web Worker based to prevent background throttling)
   useEffect(() => {
@@ -614,14 +683,7 @@ const App: React.FC = () => {
     const totalDurationMinutes = allSessionSummariesRef.current.length;
     
     // Construct relevant objective line
-    let activeObjectiveStr = "";
-    if (activeTargetView === 'Time') {
-        activeObjectiveStr = `Time ${sessionDurationGoal}m`;
-    } else if (activeTargetView === 'HeartPoints') {
-        activeObjectiveStr = `Heart Points ${sessionHeartPointsGoal}`;
-    } else if (activeTargetView === 'Calories') {
-        activeObjectiveStr = `Calories ${sessionCaloriesGoal} kcal`;
-    }
+    const activeObjectiveStr = `Time ${sessionDurationGoal}m`;
 
     // --- FILE 1: FULL DEBUG LOG ---
     const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
@@ -783,7 +845,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, gender, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, deviceIdHex, selectedPersona, chattiness, isTelemetryAbstractionEnabled, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, deviceIdHex, selectedPersona, chattiness, isTelemetryAbstractionEnabled, addLog]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -947,14 +1009,7 @@ const App: React.FC = () => {
     const buffWidth = 5;
     
     // Determine active session length for TIZ calculation
-    let sessionLength = sessionDurationGoal;
-    if (activeTargetView === 'Time') {
-        sessionLength = sessionDurationGoal;
-    } else {
-        // If not time-based, use a default or current duration? 
-        // Usually these objectives are time-based in this app.
-        sessionLength = sessionDurationGoal;
-    }
+    const sessionLength = sessionDurationGoal;
 
     const minTizMins = Math.round(0.8 * sessionLength);
     const maxVarMins = sessionLength - minTizMins;
@@ -1002,12 +1057,58 @@ const App: React.FC = () => {
     addLog(`[MISSION_PROFILE] ${profileText}`);
     
     return profileText;
-  }, [age, currentObjective, sessionDurationGoal, activeTargetView, zones, addLog]);
+  }, [age, currentObjective, sessionDurationGoal, zones, addLog]);
 
   const generateNarrativeMissionPlan = useCallback(async (profileText: string) => {
       const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
       const duration = sessionDurationGoal;
+      const strategy = (currentObjective as any).transitionStrategy || "normal state";
       
+      let exampleFormat = "";
+      if (strategy === "interval state") {
+          exampleFormat = `
+      [THEME]: Operation Laser-Pointer: The high-intensity interval chase against the "Chubby-Chonk" Boss!
+      [TIMELINE]:
+       0:00 [Interval 1 - The First Pounce]: The Boss engages full laser-chase mode! User must push into the target heart rate zone (135+) to evade the barrage.
+       3:00 [Recovery 1 - The Grooming Break]: The Boss retreats to aggressively groom a paw. User must drop back to the recovery zone (115) to shed heat and regroup.
+       6:00 [Interval 2 - The Midnight Zoomies]: Unprovoked Phase Two! The Boss initiates the midnight zoomies. Push back into the target heart rate zone (135+) to match the chaos.
+       9:00 [Recovery 2 - The Cardboard Box]: The Boss is temporarily distracted by a high-value cardboard box. Maintain the recovery zone (115) and catch your breath.
+      12:00 [Interval 3 - The Final Stand]: The Boss goes berserk and summons the red-dot swarm! Final push into the target heart rate zone (135+) to break the sisal shield.
+      15:00 [Recovery 3 - The Nap]: The Boss's stamina is broken; the beast demands a nap. Spin down safely to baseline.
+      18:00 [Boss Defeated]: The Boss is fully asleep. Encounter survived. 
+
+      [Mission Complete]: VICTORY! The Golden Yarn Trophy is safely secured while the beast slumbers!
+      [Maguffin]: Golden Yarn Trophy
+      [BONUS]: SECRET STAGE UNLOCKED! You kept pedaling while the boss slept. The Golden Yarn Trophy is enhanced, and your laser pointer is upgraded to a prismatic beam.
+      `;
+      } else if (strategy === "normal state") {
+          exampleFormat = `
+      [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
+      [TIMELINE]:
+       0:00 [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
+       2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
+       5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
+      10:00 [Encounter Midpoint]: Boss at half health - stamina check 
+      15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
+      18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
+      20:00 [Boss Down]: Boss defeated; time to celebrate the victory. User can either recover or go for bonus points. 
+      [Mission Complete]:	VICTORY! the Golden Yarn Trophy is yours!
+      [Maguffin]: Golden Yarn Trophy
+      [BONUS]:	SECRET STAGE UNLOCKED! the Golden Yarn Trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
+      `;
+      } else {
+          // Default: Fixed State
+          exampleFormat = `
+      [THEME]: Operation Laser-Pointer: The fixed-state mission to secure the Golden Yarn Trophy!
+      [TIMELINE]:
+      (Timeline is blank for fixed state objectives)
+
+      [Mission Complete]: VICTORY! The Golden Yarn Trophy is yours!
+      [Maguffin]: Golden Yarn Trophy
+      [BONUS]: SECRET STAGE UNLOCKED! The Golden Yarn Trophy is enhanced by your extra effort.
+      `;
+      }
+
       const prompt = `
       You are an expert author/Narrative creator. Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. 
       
@@ -1023,19 +1124,7 @@ const App: React.FC = () => {
       4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
       
       Output Format: (based on Steady State 'walking')
-      [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
-
-      [TIMELINE]:
-       0:00 [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
-       2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
-       5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
-      10:00 [Encounter Midpoint]: Boss at half health - stamina check 
-      15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
-      18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
-      20:00 [Boss Down]: Boss defeated; time to celebrate the victory
-      [Mission Complete]:	VICTORY! the Golden Yarn Trophy is yours!
-      [Maguffin]: Golden Yarn Trophy
-      [BONUS]:	SECRET STAGE UNLOCKED! the Golden Yarn Trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
+      ${exampleFormat}
       `;
 
       try {
@@ -1060,25 +1149,14 @@ const App: React.FC = () => {
           addLog(`AI_ERROR: Narrative Mission Plan generation failed. ${e instanceof Error ? e.message : ''}`);
           narrativeMissionPlanRef.current = null;
       }
-  }, [selectedPersona, sessionDurationGoal, addLog, generateContentWithRetry]);
+  }, [selectedPersona, sessionDurationGoal, currentObjective, addLog, generateContentWithRetry]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const personaIdentity = personaConfig.systemInstruction;
     
-    let objectivesContext = "";
-    let examplePhrase = "";
-
-    if (activeTargetView === 'Time') {
-        objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
-        examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
-    } else if (activeTargetView === 'HeartPoints') {
-        objectivesContext = `Mission Parameter: Target Heart Points: ${sessionHeartPointsGoal}`;
-        examplePhrase = `"Let's hit ${sessionHeartPointsGoal} points today"`;
-    } else if (activeTargetView === 'Calories') {
-        objectivesContext = `Mission Parameter: Target Calories: ${sessionCaloriesGoal} kcal`;
-        examplePhrase = `"We are burning ${sessionCaloriesGoal} calories today"`;
-    }
+    const objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
+    const examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
 
     let narrativeContext = "";
     if (narrativeMissionPlanRef.current) {
@@ -1131,7 +1209,7 @@ const App: React.FC = () => {
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, activeTargetView, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect summaries
@@ -1207,6 +1285,7 @@ const App: React.FC = () => {
     const midTermContext = currentSessionContextRef.current ? currentSessionContextRef.current.text : "N/A";
     // Get Mission Profile text
     const missionProfileText = missionProfileRef.current ? missionProfileRef.current.text : "Standard Protocol";
+    const narrativeMissionPlanText = narrativeMissionPlanRef.current ? narrativeMissionPlanRef.current.text : "Standard Narrative";
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const personaIdentity = personaConfig.systemInstruction;
     
@@ -1233,18 +1312,18 @@ const App: React.FC = () => {
     Persona: ${personaIdentity}
     User Goal: ${currentObjective.title}
     Mission Plan / Profile: ${missionProfileText}
+    Narrative Mission Plan: ${narrativeMissionPlanText}
 
     ${abstractionInstruction}
 
-    Task: The workout session has ended. Generate a final session report based on the context below.
+    Task: The workout session has ended. Generate a final session report based on the context below. Use only prose and don't include any markdown tags in the output. Output will be read by a TTS so ensure that it won't sound like "reading a phonebook". Four sentence maximum output. 
     
     Constraints: 
     - Professional, summary-focused, and concluding. 
     - Be generous with the ending workout stats. 
-    - Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time).
+    - Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss and Maguffin. 
     - Use the 'Active Duration' (${activeMinutes} mins) as the primary reference for workout intensity and milestone timing.
-    - Provide a narrative arc that reflects the user's performance from start to finish.
-    - Include a final word of encouragement or a "mission debrief" summary.
+    - Include a final word of encouragement.
     
     Session Stats: 
     - Total Wall Time: ${finalDuration}
@@ -1253,6 +1332,7 @@ const App: React.FC = () => {
     - Peak HR: ${peakHr} BPM
     - Calories: ${totalCalories.toFixed(0)}
     - Heart Points: ${totalPoints}
+    ${(currentObjective as any).transitionStrategy === "interval state" ? `- Intervals Completed: ${intervalCount}` : ""}
     
     Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
     
@@ -1363,13 +1443,12 @@ const App: React.FC = () => {
     const activeTimeStr = formatMMSS(activeDurationRef.current);
     const timerContext = `[CURRENT TIMERS]\nActive_Time: ${activeTimeStr}`;
 
-    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n`;
-    if (activeTargetView === 'Time') {
-        objectiveStatus += `- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
-    } else if (activeTargetView === 'HeartPoints') {
-        objectiveStatus += `- Heart Points: ${runningMetricsRef.current.heartPoints} / ${sessionHeartPointsGoal}`;
-    } else if (activeTargetView === 'Calories') {
-        objectiveStatus += `- Calories: ${runningMetricsRef.current.calories.toFixed(0)} / ${sessionCaloriesGoal} kcal`;
+    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
+    
+    // Interval Count for Interval Strategy
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    if (strategy === "interval state") {
+        objectiveStatus += `\n- Interval Count: ${intervalCount}`;
     }
     
     // Total Denominator for compliance should only include performance-active minutes
@@ -1383,7 +1462,7 @@ const App: React.FC = () => {
 
 
     const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}`;
+    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- HR Trend (10s): ${hrTrend}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
@@ -1646,6 +1725,30 @@ const App: React.FC = () => {
             }
             
             setCurrentHR(numericHR);
+
+            // --- HR Trend Calculation ---
+            const nowMs = Date.now();
+            const smoothedHR = 0.7 * numericHR + 0.3 * (smoothedHRRef.current ?? numericHR);
+            smoothedHRRef.current = smoothedHR;
+            
+            hrHistoryRef.current.push({ hr: smoothedHR, timestamp: nowMs });
+            // Keep only last 10 seconds
+            hrHistoryRef.current = hrHistoryRef.current.filter(p => nowMs - p.timestamp <= 10000);
+            
+            if (hrHistoryRef.current.length > 1) {
+                const oldest = hrHistoryRef.current[0];
+                const newest = hrHistoryRef.current[hrHistoryRef.current.length - 1];
+                const diff = newest.hr - oldest.hr;
+                
+                let trend = "Stable";
+                if (diff > 10) trend = "Fast Increase";
+                else if (diff > 4) trend = "Increase";
+                else if (diff < -10) trend = "Fast Decrease";
+                else if (diff < -4) trend = "Decrease";
+                
+                setHrTrend(trend);
+            }
+
             setDataPoints((prev) => {
               const updated = [...prev, newData];
               return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
@@ -1686,8 +1789,6 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.GENDER, gender);
     localStorage.setItem(STORAGE_KEYS.GOAL, trainingGoal);
     localStorage.setItem(STORAGE_KEYS.DURATION, String(sessionDurationGoal));
-    localStorage.setItem(STORAGE_KEYS.HP_GOAL, String(sessionHeartPointsGoal));
-    localStorage.setItem(STORAGE_KEYS.CAL_GOAL, String(sessionCaloriesGoal));
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
     localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
@@ -1712,6 +1813,10 @@ const App: React.FC = () => {
     if (wsRef.current) wsRef.current.close();
     setDataPoints([]);
     setCurrentHR(null);
+    setHrTrend("Stable");
+    setIntervalCount(0);
+    hrHistoryRef.current = [];
+    smoothedHRRef.current = null;
     currentMinuteRef.current = [];
     allSessionSummariesRef.current = [];
     sessionTransitionsRef.current = []; // Clear transitions log
@@ -1734,7 +1839,7 @@ const App: React.FC = () => {
     lastUpdateWallTimeRef.current = 0;
     nextActiveTargetRef.current = 60000;
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, sessionHeartPointsGoal, sessionCaloriesGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled]);
 
   useEffect(() => {
     connect();
@@ -1876,34 +1981,14 @@ const App: React.FC = () => {
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Target Config</label>
                 <div className="flex items-center gap-2">
-                  <select 
-                    value={activeTargetView} 
-                    onChange={(e) => setActiveTargetView(e.target.value as any)}
-                    className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-cyan-400/50 transition-colors appearance-none cursor-pointer w-24"
-                  >
-                    <option value="Time">Duration</option>
-                    <option value="HeartPoints">Heart Pts</option>
-                    <option value="Calories">Calories</option>
-                  </select>
+                  <div className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-2 py-1.5 w-24 flex items-center justify-center">
+                    Duration
+                  </div>
                   
-                  {activeTargetView === 'Time' && (
-                     <div className="relative">
-                        <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
-                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">m</span>
-                     </div>
-                  )}
-                  {activeTargetView === 'HeartPoints' && (
-                     <div className="relative">
-                        <input type="number" value={sessionHeartPointsGoal} onChange={(e) => setSessionHeartPointsGoal(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
-                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">pt</span>
-                     </div>
-                  )}
-                  {activeTargetView === 'Calories' && (
-                     <div className="relative">
-                        <input type="number" value={sessionCaloriesGoal} onChange={(e) => setSessionCaloriesGoal(Math.max(1, parseInt(e.target.value) || 0))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
-                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">kc</span>
-                     </div>
-                  )}
+                  <div className="relative">
+                    <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
+                    <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">m</span>
+                  </div>
                 </div>
               </div>
 
@@ -2049,6 +2134,8 @@ const App: React.FC = () => {
               activeTime={activeTime}
               latestInsight={latestInsightCleaned}
               isFullScreen={isFullScreen}
+              hrTrend={hrTrend}
+              intervalCount={intervalCount}
             />
             {!isFullScreen && (
               <div className="p-4 aether-border bg-slate-900/20 opacity-60 text-[10px] font-mono">

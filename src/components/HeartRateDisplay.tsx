@@ -8,9 +8,11 @@ interface HeartRateDisplayProps {
   activeTime: string;
   latestInsight?: string;
   isFullScreen?: boolean;
+  hrTrend?: string;
+  intervalCount?: number;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, activeTime, latestInsight, isFullScreen }) => {
+const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, activeTime, latestInsight, isFullScreen, hrTrend, intervalCount }) => {
   const displayValue = hr !== null ? hr : '--';
   
   // Neutral fallbacks for when no zone is matched or no data is present
@@ -55,7 +57,18 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
         <span className={`text-9xl font-black font-mono tracking-tighter transition-all duration-500 ${hr !== null ? (zone ? 'text-white' : 'text-slate-400') : defaultTextColor}`}>
           {displayValue}
         </span>
-        <span className={`text-2xl font-bold uppercase transition-colors duration-500 ${zone ? zone.textClass : 'text-slate-700'}`}>BPM</span>
+        <div className="flex flex-col">
+          <span className={`text-2xl font-bold uppercase transition-colors duration-500 ${zone ? zone.textClass : 'text-slate-700'}`}>BPM</span>
+          {hrTrend && (
+            <span className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${
+              hrTrend.includes('Increase') ? 'text-red-500' : 
+              hrTrend.includes('Decrease') ? 'text-blue-500' : 
+              'text-slate-500'
+            }`}>
+              {hrTrend}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Session Timer */}
@@ -69,6 +82,14 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
             <span className="text-[9px] text-cyan-500/70 uppercase tracking-[0.2em] mb-1">Active Time</span>
             <div className="text-2xl font-mono font-bold tracking-widest text-cyan-400">
                 {activeTime}
+            </div>
+          </div>
+        )}
+        {intervalCount !== undefined && intervalCount > 0 && (
+          <div className="mt-2 flex flex-col items-center">
+            <span className="text-[9px] text-orange-500/70 uppercase tracking-[0.2em] mb-1">Intervals</span>
+            <div className="text-2xl font-mono font-bold tracking-widest text-orange-400">
+                {intervalCount}
             </div>
           </div>
         )}

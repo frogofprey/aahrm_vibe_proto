@@ -17,7 +17,7 @@ export const TRAINING_OBJECTIVES: TrainingObjective[] = [
   {
     title: "Anaerobic Interval",
     targetZones: [4, 5],
-    transitionStrategy: "normal state",
+    transitionStrategy: "interval state",
     mission: "ANAEROBIC (Zone 4/5 Push)\nBIOMETRIC MAP\nMHR: {{MHR}} BPM\nZ1: {{Z1_MIN}}-{{Z1_MAX}} BPM\nZ2: {{Z2_MIN}}-{{Z2_MAX}} BPM\nZ3: {{Z3_MIN}}-{{Z3_MAX}} BPM\nZ4: {{Z4_MIN}}-{{Z4_MAX}} BPM\nZ5: {{Z5_MIN}}-{{Z5_MAX}} BPM\nPRIMARY DIRECTIVE\nTarget: High-Intensity Interval Peaks ({{Z4_MIN}}-{{Z5_MAX}} BPM)\nInterval Floor: >{{Z4_MIN}} BPM\nSuccess: Completion of 3 targeted spikes with full recovery.\nPHASE PROTOCOLS (Iterative Loop)\nWARMUP: Transition to {{Z2_MIN}} BPM. Goal: Reach target within 5:00.\nMAIN_ACTIVE (Spike): Push HR > {{Z4_MIN}} BPM.\nRECOVERY (Valley): Drop HR < {{Z3_MAX}} BPM.\nADHERENCE LOGIC\nRating: 'Good' if user breaches the {{Z4_MIN}} floor during the Spike phases and successfully drops below the {{Z2_MAX}} ceiling during the Valley phases.\nSAFETY & RECOVERY\nRecovery Ceiling: {{Z2_MAX}} BPM (Ensure aerobic baseline is restored before next interval).\nRedline: {{MHR}} BPM.\nAlert: Warning - Absolute maximum heart rate reached. Abort interval and immediately drop to Zone 1."
   }
 ];
