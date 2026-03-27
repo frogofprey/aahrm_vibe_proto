@@ -101,7 +101,9 @@ const STORAGE_KEYS = {
   CHATTINESS: 'aetheraegis_chattiness',
   SHOW_SYS: 'aetheraegis_show_sys_logs',
   SHOW_USER: 'aetheraegis_show_user_logs',
-  ABSTRACTION: 'aetheraegis_telemetry_abstraction'
+  ABSTRACTION: 'aetheraegis_telemetry_abstraction',
+  INTERVAL_TIME: 'aetheraegis_interval_time',
+  INTERVAL_COUNT_GOAL: 'aetheraegis_interval_count_goal'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -164,6 +166,9 @@ const App: React.FC = () => {
   const [showSystemLogs, setShowSystemLogs] = useState(() => localStorage.getItem(STORAGE_KEYS.SHOW_SYS) !== 'false');
   const [showUserLogs, setShowUserLogs] = useState(() => localStorage.getItem(STORAGE_KEYS.SHOW_USER) !== 'false');
 
+  const [intervalTime, setIntervalTime] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.INTERVAL_TIME) || '3'));
+  const [intervalCountGoal, setIntervalCountGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.INTERVAL_COUNT_GOAL) || '3'));
+
   // Resolve full objective object
   const currentObjective = useMemo(() => 
     TRAINING_OBJECTIVES.find(o => o.title === trainingGoal) || TRAINING_OBJECTIVES[1]
@@ -196,6 +201,7 @@ const App: React.FC = () => {
   // Refs
   const currentMinuteRef = useRef<number[]>([]);
   const lastUpdateWallTimeRef = useRef<number>(0);
+  const lastStateTransitionTimeRef = useRef<number>(Date.now());
   const nextActiveTargetRef = useRef<number>(60000);
   const wsRef = useRef<WebSocket | null>(null);
   const logIdRef = useRef(0);
@@ -208,6 +214,7 @@ const App: React.FC = () => {
   const hasStartedActiveRef = useRef(false);
   const lastPerformanceTickRef = useRef<number>(0);
   const pendingAiMarkerRef = useRef(false);
+  const hasSentFirstMainActiveInsightRef = useRef(false);
   const workerRef = useRef<Worker | null>(null);
   
   // Session Metrics Refs
@@ -228,6 +235,7 @@ const App: React.FC = () => {
 
   // State Tracking Refs (Frame-based)
   const sessionStatesInFrameRef = useRef<Set<SessionState>>(new Set());
+  const stateSamplesInFrameRef = useRef<Map<SessionState, number>>(new Map());
   
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
@@ -310,13 +318,13 @@ const App: React.FC = () => {
         // Trigger Active Timer on first transition to MAIN_ACTIVE
         if (newState === SessionState.MAIN_ACTIVE && !hasStartedActiveRef.current) {
             hasStartedActiveRef.current = true;
-            nextActiveTargetRef.current = 0; // Trigger immediate update at 0:00 active time (respecting 30s cooldown)
+            nextActiveTargetRef.current = 0; // Trigger immediate update at 0:00 active time
             addLog(`SYSTEM: Active Timer Engaged.`);
         }
 
         // Interval State Strategy: Increment count on MAIN_ACTIVE -> RECOVERY
         const strategy = (currentObjective as any).transitionStrategy || "normal state";
-        if (strategy === "interval state") {
+        if (strategy === "interval state" || strategy === "fixed interval state") {
             if (currentSessionStateRef.current === SessionState.MAIN_ACTIVE && newState === SessionState.RECOVERY) {
                 setIntervalCount(prev => prev + 1);
                 addLog(`SYSTEM: Interval ${intervalCount + 1} completed.`);
@@ -326,6 +334,7 @@ const App: React.FC = () => {
         // Update Actual State
         currentSessionStateRef.current = newState;
         setCurrentSessionState(newState);
+        lastStateTransitionTimeRef.current = Date.now();
     }
   }, [addLog, currentObjective, intervalCount]);
 
@@ -423,6 +432,56 @@ const App: React.FC = () => {
                   }
               } else {
                   transitionTimersRef.current.pauseToMain = null;
+              }
+          }
+          return;
+      }
+
+      // 6b. Fixed Interval Strategy Logic
+      if (strategy === "fixed interval state") {
+          const now = Date.now();
+          const elapsedMs = now - (sessionStartTime || now);
+          const elapsedMinutes = elapsedMs / 60000;
+          const timeInStateMs = now - lastStateTransitionTimeRef.current;
+          const timeInStateMinutes = timeInStateMs / 60000;
+          
+          let targetMinBPM = 999;
+          if (currentObjective.targetZones.length > 0) {
+              const minZoneIdx = Math.min(...currentObjective.targetZones);
+              const zone = minZoneIdx > 0 ? zones[minZoneIdx - 1] : zones[0];
+              if (zone) targetMinBPM = zone.min;
+          }
+
+          if (currentSessionState === SessionState.INIT || currentSessionState === SessionState.WARMUP) {
+              // Warmup to Main Active (Time or HR)
+              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+              if (isWarmupComplete) {
+                  if (!transitionTimersRef.current.warmupToMain) {
+                      transitionTimersRef.current.warmupToMain = now;
+                  } else if (now - transitionTimersRef.current.warmupToMain > 5000) {
+                      transitionState(SessionState.MAIN_ACTIVE, "Warmup targets met (Fixed Interval Strategy)");
+                      transitionTimersRef.current.warmupToMain = null;
+                  }
+              } else {
+                  transitionTimersRef.current.warmupToMain = null;
+                  if (currentSessionState === SessionState.INIT && elapsedMinutes > 0.1) {
+                      transitionState(SessionState.WARMUP, "Initialization complete");
+                  }
+              }
+          } else if (currentSessionState === SessionState.MAIN_ACTIVE) {
+              // Main Active to Recovery (Time based)
+              if (timeInStateMinutes >= intervalTime) {
+                  transitionState(SessionState.RECOVERY, `Fixed Interval (${intervalTime}m) complete`);
+              }
+          } else if (currentSessionState === SessionState.RECOVERY) {
+              // Recovery to Main Active (Time based)
+              if (timeInStateMinutes >= intervalTime) {
+                  if (intervalCount < intervalCountGoal) {
+                      transitionState(SessionState.MAIN_ACTIVE, `Fixed Recovery (${intervalTime}m) complete`);
+                  } else {
+                      // Session complete? Or just stay in recovery?
+                      // Let's just stay in RECOVERY for now.
+                  }
               }
           }
           return;
@@ -614,8 +673,8 @@ const App: React.FC = () => {
                 }
             }
 
-            // Safety: Never fire more than once every 30 seconds
-            if (isAiTrigger && timeSinceLastUpdate < 30000) {
+            // Safety: Never fire more than once every 25 seconds
+            if (isAiTrigger && timeSinceLastUpdate < 25000) {
                 if (showSystemLogs && isAiTrigger) {
                     addLog(`DEBUG: AI Update suppressed (Cooldown: ${Math.round(timeSinceLastUpdate/1000)}s)`);
                 }
@@ -625,14 +684,14 @@ const App: React.FC = () => {
             // Only trigger if we have data to analyze
             if (isAiTrigger) {
                 const hasData = currentMinuteRef.current.length > 0;
-                lastUpdateWallTimeRef.current = now;
-                // Advance active target if we are in active mode
-                if (hasStartedActiveRef.current) {
-                    nextActiveTargetRef.current = (Math.floor(currentActiveTime / 60000) + 1) * 60000;
-                }
                 
                 // Trigger calculation and AI call if we have data
                 if (hasData && calcRef.current) {
+                    lastUpdateWallTimeRef.current = now;
+                    // Advance active target if we are in active mode
+                    if (hasStartedActiveRef.current) {
+                        nextActiveTargetRef.current = (Math.floor(currentActiveTime / 60000) + 1) * 60000;
+                    }
                     pendingAiMarkerRef.current = true;
                     calcRef.current();
                 }
@@ -683,7 +742,11 @@ const App: React.FC = () => {
     const totalDurationMinutes = allSessionSummariesRef.current.length;
     
     // Construct relevant objective line
-    const activeObjectiveStr = `Time ${sessionDurationGoal}m`;
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    let activeObjectiveStr = `Time ${sessionDurationGoal}m`;
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        activeObjectiveStr = `${intervalCountGoal} Intervals of ${intervalTime}m each`;
+    }
 
     // --- FILE 1: FULL DEBUG LOG ---
     const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
@@ -1050,19 +1113,24 @@ const App: React.FC = () => {
       .replace(/{{BUFF_MIN}}/g, buffMin.toString())
       .replace(/{{BUFF_MAX}}/g, buffMax.toString())
       .replace(/{{MIN_TIZ_MINS}}/g, minTizMins.toString())
-      .replace(/{{MAX_VAR_MINS}}/g, maxVarMins.toString());
+      .replace(/{{MAX_VAR_MINS}}/g, maxVarMins.toString())
+      .replace(/{{TIME}}/g, intervalTime.toString())
+      .replace(/{{COUNT}}/g, intervalCountGoal.toString());
 
     addLog(`SYSTEM: Mission Profile generated locally for "${currentObjective.title}"`);
     missionProfileRef.current = { prompt: "LOCAL_GENERATION", text: profileText, tokenUsage: undefined };
     addLog(`[MISSION_PROFILE] ${profileText}`);
     
     return profileText;
-  }, [age, currentObjective, sessionDurationGoal, zones, addLog]);
+  }, [age, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, zones, addLog]);
 
   const generateNarrativeMissionPlan = useCallback(async (profileText: string) => {
       const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
-      const duration = sessionDurationGoal;
       const strategy = (currentObjective as any).transitionStrategy || "normal state";
+      const isInterval = strategy === "interval state" || strategy === "fixed interval state";
+      const sessionContext = isInterval 
+        ? `Session Structure: ${intervalCountGoal} intervals of ${intervalTime} minutes each.`
+        : `Session Duration: ${sessionDurationGoal} minutes.`;
       
       let exampleFormat = "";
       if (strategy === "interval state") {
@@ -1085,8 +1153,7 @@ const App: React.FC = () => {
           exampleFormat = `
       [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
       [TIMELINE]:
-       0:00 [The Loading Screen]: user is getting ready to engage and should be ramping up to the target heart rate zone.
-       2:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
+       0:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
        5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
       10:00 [Encounter Midpoint]: Boss at half health - stamina check 
       15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
@@ -1115,15 +1182,16 @@ const App: React.FC = () => {
       Persona: ${personaConfig.systemInstruction}
       Persona Mission Instruction: ${personaConfig.missionProfile}
       Mission Profile: ${profileText}
-      Session Duration: ${duration} minutes.
+      ${sessionContext}
       
       Requirements:
       1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
       2. Define specific Milestones/Narrative events triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. Incorporate planned state transitions into the plan as best as is possible. 
       3. Define a "Mission Complete" narrative conclusion (Goals Met). Generate a Maguffin for the persona to use narratively. 
       4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
+      5. Ensure that you match the structure of the session. If the session is based on intervals, ensure that you capture each interval transition and try to theme each transition using the persona's instructions. Focus on the transitions. Note that the interval time provided will be for both interval and recovery as well (so a 3 minute interval time will produce a 6 minute cycle).  If the session is time based, try to create reasonable milestones based on the template. In both cases it may be neccessary to adjust timing to match user parameters. Don't include milestones or sections for warmup as they will be handled outside of the mission script. 
       
-      Output Format: (based on Steady State 'walking')
+      Output Format:
       ${exampleFormat}
       `;
 
@@ -1149,15 +1217,21 @@ const App: React.FC = () => {
           addLog(`AI_ERROR: Narrative Mission Plan generation failed. ${e instanceof Error ? e.message : ''}`);
           narrativeMissionPlanRef.current = null;
       }
-  }, [selectedPersona, sessionDurationGoal, currentObjective, addLog, generateContentWithRetry]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, generateContentWithRetry]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const personaIdentity = personaConfig.systemInstruction;
     
-    const objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
-    const examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    let objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
+    let examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
 
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        objectivesContext = `Mission Parameter: Target Intervals: ${intervalCountGoal} cycles of ${intervalTime} minutes each.`;
+        examplePhrase = `"Let's smash these ${intervalCountGoal} intervals"`;
+    }
+    
     let narrativeContext = "";
     if (narrativeMissionPlanRef.current) {
         narrativeContext = `\nNarrative Mission Plan:\n${narrativeMissionPlanRef.current.text}`;
@@ -1209,7 +1283,7 @@ const App: React.FC = () => {
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
 
   const generateSessionSummary = useCallback(async () => {
     // Collect summaries
@@ -1332,7 +1406,7 @@ const App: React.FC = () => {
     - Peak HR: ${peakHr} BPM
     - Calories: ${totalCalories.toFixed(0)}
     - Heart Points: ${totalPoints}
-    ${(currentObjective as any).transitionStrategy === "interval state" ? `- Intervals Completed: ${intervalCount}` : ""}
+    ${((currentObjective as any).transitionStrategy === "interval state" || (currentObjective as any).transitionStrategy === "fixed interval state") ? `- Intervals Completed: ${intervalCount} / ${intervalCountGoal}` : ""}
     
     Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
     
@@ -1440,15 +1514,22 @@ const App: React.FC = () => {
     const currentPerformanceMinutes = (performanceDurationRef.current / 60000).toFixed(1);
     
     // Timer Context
-    const activeTimeStr = formatMMSS(activeDurationRef.current);
+    let activeTimeStr = formatMMSS(activeDurationRef.current);
+    if (summary.sessionState === SessionState.WARMUP || summary.sessionState === SessionState.INIT) {
+        activeTimeStr = 'WARMING UP';
+    }
+    
+    // Override for the very first MAIN_ACTIVE insight to ensure it's always 0:00
+    if (hasStartedActiveRef.current && !hasSentFirstMainActiveInsightRef.current) {
+        activeTimeStr = '0:00';
+        hasSentFirstMainActiveInsightRef.current = true;
+    }
     const timerContext = `[CURRENT TIMERS]\nActive_Time: ${activeTimeStr}`;
 
-    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
-    
-    // Interval Count for Interval Strategy
     const strategy = (currentObjective as any).transitionStrategy || "normal state";
-    if (strategy === "interval state") {
-        objectiveStatus += `\n- Interval Count: ${intervalCount}`;
+    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Intervals: ${intervalCount} / ${intervalCountGoal}\n- Interval Time: ${intervalTime} mins`;
     }
     
     // Total Denominator for compliance should only include performance-active minutes
@@ -1547,26 +1628,45 @@ const App: React.FC = () => {
     const timestamp = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     // --- FRAME STATE CALCULATION ---
-    // Prioritize states encountered during the frame based on: WARMUP > RECOVERY > ERROR > PAUSE > MAIN_ACTIVE
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    const isIntervalStrategy = strategy === "interval state" || strategy === "fixed interval state";
     const observedStates = sessionStatesInFrameRef.current;
     let effectiveFrameState = currentSessionState;
 
-    if (observedStates.has(SessionState.WARMUP)) {
-        effectiveFrameState = SessionState.WARMUP;
-    } else if (observedStates.has(SessionState.RECOVERY)) {
-        effectiveFrameState = SessionState.RECOVERY;
-    } else if (observedStates.has(SessionState.ERROR)) {
-        effectiveFrameState = SessionState.ERROR;
-    } else if (observedStates.has(SessionState.PAUSE)) {
-        effectiveFrameState = SessionState.PAUSE;
-    } else if (observedStates.has(SessionState.MAIN_ACTIVE)) {
-        effectiveFrameState = SessionState.MAIN_ACTIVE;
+    if (isIntervalStrategy) {
+        // For interval state, use the majority state in the frame
+        let maxSamples = -1;
+        let majorityState = currentSessionState;
+        stateSamplesInFrameRef.current.forEach((count, state) => {
+            if (count > maxSamples) {
+                maxSamples = count;
+                majorityState = state;
+            }
+        });
+        effectiveFrameState = majorityState;
+    } else {
+        // Prioritize states encountered during the frame based on: ERROR > PAUSE > RECOVERY > BONUS_ACTIVE > MAIN_ACTIVE > WARMUP
+        if (observedStates.has(SessionState.ERROR)) {
+            effectiveFrameState = SessionState.ERROR;
+        } else if (observedStates.has(SessionState.PAUSE)) {
+            effectiveFrameState = SessionState.PAUSE;
+        } else if (observedStates.has(SessionState.RECOVERY)) {
+            effectiveFrameState = SessionState.RECOVERY;
+        } else if (observedStates.has(SessionState.BONUS_ACTIVE)) {
+            effectiveFrameState = SessionState.BONUS_ACTIVE;
+        } else if (observedStates.has(SessionState.MAIN_ACTIVE)) {
+            effectiveFrameState = SessionState.MAIN_ACTIVE;
+        } else if (observedStates.has(SessionState.WARMUP)) {
+            effectiveFrameState = SessionState.WARMUP;
+        }
     }
-    // Else fall back to current state (likely BONUS_ACTIVE or INIT)
+    // Else fall back to current state (likely INIT)
     
     // Reset frame state tracker for the next minute, but seed it with the current state
     sessionStatesInFrameRef.current.clear();
     sessionStatesInFrameRef.current.add(currentSessionState);
+    stateSamplesInFrameRef.current.clear();
+    stateSamplesInFrameRef.current.set(currentSessionState, 0);
 
     const avgHr = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
     const maxVal = Math.max(...values);
@@ -1585,9 +1685,17 @@ const App: React.FC = () => {
     let isCompliant = false;
     const margin = 3;
 
-    const strategy = (currentObjective as any).transitionStrategy || "normal state";
     if (strategy === "fixed state - MAIN_ACTIVE") {
         isCompliant = true;
+    } else if (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY) {
+        // For interval recovery, compliance means staying below the recovery ceiling
+        // We use the zone below the lowest target zone as a proxy
+        const minZoneIdx = Math.min(...currentObjective.targetZones);
+        const targetZone = minZoneIdx > 0 ? zones[minZoneIdx - 1] : zones[0];
+        if (targetZone) {
+            // Compliance in recovery is being below the target zone floor (plus margin)
+            isCompliant = avgHr < (targetZone.min + margin);
+        }
     } else {
         for (const targetZoneIdx of currentObjective.targetZones) {
             // Adjust for 1-based indexing in objective vs 0-based in zones array
@@ -1623,7 +1731,10 @@ const App: React.FC = () => {
     
     // Only increment Compliance Denominator if in active performance states
     // This allows WARMUP and RECOVERY to be ignored for percentage calculation
-    const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || effectiveFrameState === SessionState.BONUS_ACTIVE;
+    // For interval state, RECOVERY is an integral part of the performance
+    const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || 
+                               effectiveFrameState === SessionState.BONUS_ACTIVE ||
+                               (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY);
     
     if (isPerformanceState) {
         const minutesElapsed = values.length / 60;
@@ -1718,6 +1829,9 @@ const App: React.FC = () => {
             
             if (sessionActiveRef.current) {
                 currentMinuteRef.current.push(numericHR);
+                sessionStatesInFrameRef.current.add(currentSessionStateRef.current);
+                const currentCount = stateSamplesInFrameRef.current.get(currentSessionStateRef.current) || 0;
+                stateSamplesInFrameRef.current.set(currentSessionStateRef.current, currentCount + 1);
             }
 
             if (showRawTelemetryRef.current) {
@@ -1789,6 +1903,8 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.GENDER, gender);
     localStorage.setItem(STORAGE_KEYS.GOAL, trainingGoal);
     localStorage.setItem(STORAGE_KEYS.DURATION, String(sessionDurationGoal));
+    localStorage.setItem(STORAGE_KEYS.INTERVAL_TIME, String(intervalTime));
+    localStorage.setItem(STORAGE_KEYS.INTERVAL_COUNT_GOAL, String(intervalCountGoal));
     localStorage.setItem(STORAGE_KEYS.VOICE, String(isVoiceEnabled));
     localStorage.setItem(STORAGE_KEYS.PERSONA, selectedPersona);
     localStorage.setItem(STORAGE_KEYS.CHATTINESS, String(chattiness));
@@ -1833,9 +1949,11 @@ const App: React.FC = () => {
     setIntroText(null);
     setElapsedTime("00:00:00");
     setActiveTime("00:00");
+    lastStateTransitionTimeRef.current = Date.now();
     performanceDurationRef.current = 0; // Reset Performance Duration
     activeDurationRef.current = 0;
     hasStartedActiveRef.current = false;
+    hasSentFirstMainActiveInsightRef.current = false;
     lastUpdateWallTimeRef.current = 0;
     nextActiveTargetRef.current = 60000;
     setTimeout(connect, 300);
@@ -1903,6 +2021,7 @@ const App: React.FC = () => {
       performanceDurationRef.current = 0; // Reset performance duration
       activeDurationRef.current = 0;
       hasStartedActiveRef.current = false;
+      hasSentFirstMainActiveInsightRef.current = false;
       lastUpdateWallTimeRef.current = now;
       nextActiveTargetRef.current = 60000;
       setIntroText(null);
@@ -1911,6 +2030,8 @@ const App: React.FC = () => {
       // Reset Frame Tracking
       sessionStatesInFrameRef.current.clear();
       sessionStatesInFrameRef.current.add(SessionState.INIT);
+      stateSamplesInFrameRef.current.clear();
+      stateSamplesInFrameRef.current.set(SessionState.INIT, 0);
 
       addLog("SESSION: Workout started. Timer active.");
 
@@ -1981,14 +2102,38 @@ const App: React.FC = () => {
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Session Target Config</label>
                 <div className="flex items-center gap-2">
-                  <div className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-2 py-1.5 w-24 flex items-center justify-center">
-                    Duration
-                  </div>
-                  
-                  <div className="relative">
-                    <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
-                    <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">m</span>
-                  </div>
+                  {trainingGoal === "Fixed Anaerobic Interval" ? (
+                    <>
+                      <div className="flex items-center gap-1">
+                        <div className="bg-black border border-white/10 text-cyan-400 font-mono text-[9px] px-1.5 py-1.5 w-16 flex items-center justify-center">
+                          Int. Time
+                        </div>
+                        <div className="relative">
+                          <input type="number" value={intervalTime} onChange={(e) => setIntervalTime(Math.max(1, parseInt(e.target.value) || 1))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-14 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-4" />
+                          <span className="absolute right-1 top-1.5 text-[8px] text-slate-500">m</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="bg-black border border-white/10 text-cyan-400 font-mono text-[9px] px-1.5 py-1.5 w-16 flex items-center justify-center">
+                          Count
+                        </div>
+                        <div className="relative">
+                          <input type="number" value={intervalCountGoal} onChange={(e) => setIntervalCountGoal(Math.max(1, parseInt(e.target.value) || 1))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-12 focus:outline-none focus:border-cyan-400/50 transition-colors text-right" />
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="bg-black border border-white/10 text-cyan-400 font-mono text-xs px-2 py-1.5 w-24 flex items-center justify-center">
+                        Duration
+                      </div>
+                      
+                      <div className="relative">
+                        <input type="number" value={sessionDurationGoal} onChange={(e) => setSessionDurationGoal(Math.max(1, parseInt(e.target.value) || 20))} className="bg-black border border-white/10 text-white font-mono text-xs px-2 py-1.5 w-20 focus:outline-none focus:border-cyan-400/50 transition-colors text-right pr-6" />
+                        <span className="absolute right-2 top-1.5 text-[10px] text-slate-500">m</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
