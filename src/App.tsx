@@ -103,7 +103,10 @@ const STORAGE_KEYS = {
   SHOW_USER: 'aetheraegis_show_user_logs',
   ABSTRACTION: 'aetheraegis_telemetry_abstraction',
   INTERVAL_TIME: 'aetheraegis_interval_time',
-  INTERVAL_COUNT_GOAL: 'aetheraegis_interval_count_goal'
+  INTERVAL_COUNT_GOAL: 'aetheraegis_interval_count_goal',
+  ACTIVITY_VERBALIZATION: 'aetheraegis_activity_verbalization',
+  SELECTED_ACTIVITY: 'aetheraegis_selected_activity',
+  CUSTOM_ACTIVITY: 'aetheraegis_custom_activity'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -168,6 +171,11 @@ const App: React.FC = () => {
 
   const [intervalTime, setIntervalTime] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.INTERVAL_TIME) || '3'));
   const [intervalCountGoal, setIntervalCountGoal] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.INTERVAL_COUNT_GOAL) || '3'));
+
+  // Activity Verbalization State
+  const [isActivityVerbalizationEnabled, setIsActivityVerbalizationEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.ACTIVITY_VERBALIZATION) !== 'false');
+  const [selectedActivity, setSelectedActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.SELECTED_ACTIVITY) || 'walking');
+  const [customActivity, setCustomActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.CUSTOM_ACTIVITY) || '');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -1132,6 +1140,10 @@ const App: React.FC = () => {
         ? `Session Structure: ${intervalCountGoal} intervals of ${intervalTime} minutes each.`
         : `Session Duration: ${sessionDurationGoal} minutes.`;
       
+      const activityContext = !isActivityVerbalizationEnabled 
+        ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
+        : "";
+
       let exampleFormat = "";
       if (strategy === "interval state") {
           exampleFormat = `
@@ -1182,7 +1194,7 @@ const App: React.FC = () => {
       Persona: ${personaConfig.systemInstruction}
       Persona Mission Instruction: ${personaConfig.missionProfile}
       Mission Profile: ${profileText}
-      ${sessionContext}
+      ${sessionContext}${activityContext}
       
       Requirements:
       1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
@@ -1240,9 +1252,13 @@ const App: React.FC = () => {
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
 
+    const activityContext = !isActivityVerbalizationEnabled 
+        ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
+        : "";
+
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title}
+    User Goal: ${currentObjective.title}${activityContext}
     ${objectivesContext}
     ${narrativeContext}
     
@@ -1379,12 +1395,16 @@ const App: React.FC = () => {
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
 
+    const activityContext = !isActivityVerbalizationEnabled 
+        ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
+        : "";
+
     const activeDurationStr = formatMMSS(activeDurationRef.current);
     const activeMinutes = (activeDurationRef.current / 60000).toFixed(1);
 
     const prompt = `
     Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title}
+    User Goal: ${currentObjective.title}${activityContext}
     Mission Plan / Profile: ${missionProfileText}
     Narrative Mission Plan: ${narrativeMissionPlanText}
 
@@ -1469,10 +1489,14 @@ const App: React.FC = () => {
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
     
+    const activityContext = !isActivityVerbalizationEnabled 
+        ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
+        : "";
+
     const tailoredSystemInstruction = `Persona: ${personaIdentity}
     Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
     ${BASE_SYSTEM_INSTRUCTION
-        .replace('{{GOAL}}', goalContext)
+        .replace('{{GOAL}}', goalContext + activityContext)
         .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}`;
     
     // --- HISTORY BUILDER START ---
@@ -1911,6 +1935,9 @@ const App: React.FC = () => {
     localStorage.setItem(STORAGE_KEYS.SHOW_SYS, String(showSystemLogs));
     localStorage.setItem(STORAGE_KEYS.SHOW_USER, String(showUserLogs));
     localStorage.setItem(STORAGE_KEYS.ABSTRACTION, String(isTelemetryAbstractionEnabled));
+    localStorage.setItem(STORAGE_KEYS.ACTIVITY_VERBALIZATION, String(isActivityVerbalizationEnabled));
+    localStorage.setItem(STORAGE_KEYS.SELECTED_ACTIVITY, selectedActivity);
+    localStorage.setItem(STORAGE_KEYS.CUSTOM_ACTIVITY, customActivity);
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -1957,7 +1984,7 @@ const App: React.FC = () => {
     lastUpdateWallTimeRef.current = 0;
     nextActiveTargetRef.current = 60000;
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity]);
 
   useEffect(() => {
     connect();
@@ -2017,6 +2044,9 @@ const App: React.FC = () => {
       setSessionStartTime(now);
       setElapsedTime("00:00:00");
       setActiveTime("00:00");
+      setSummaries([]);
+      setFinalReportText(null);
+      finalSessionReportRef.current = null;
       runningMetricsRef.current = { heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 }; // Reset metrics
       performanceDurationRef.current = 0; // Reset performance duration
       activeDurationRef.current = 0;
@@ -2048,9 +2078,15 @@ const App: React.FC = () => {
   const latestInsightCleaned = useMemo(() => {
     if (finalReportText) return cleanInsightText(finalReportText);
     if (summaries.length > 0 && summaries[0].insight) return cleanInsightText(summaries[0].insight);
+    
+    // If we are in an active state but have no summaries yet, don't show the intro text
+    // as it makes it look like the system is stuck on the intro.
+    const isActive = [SessionState.MAIN_ACTIVE, SessionState.RECOVERY, SessionState.BONUS_ACTIVE].includes(currentSessionState);
+    if (isActive && summaries.length === 0) return undefined;
+
     if (introText) return cleanInsightText(introText);
     return undefined;
-  }, [summaries, introText, finalReportText]);
+  }, [summaries, introText, finalReportText, currentSessionState]);
 
   // Filter logs for display based on category toggle state
   const filteredLogs = useMemo(() => {
@@ -2156,6 +2192,43 @@ const App: React.FC = () => {
                 >
                   {isTelemetryAbstractionEnabled ? 'Abstract: ON' : 'Abstract: OFF'}
                 </button>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Activity Verbalization</label>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setIsActivityVerbalizationEnabled(!isActivityVerbalizationEnabled)}
+                    className={`px-3 py-1.5 border font-bold rounded-sm transition-all uppercase text-[9px] tracking-widest ${isActivityVerbalizationEnabled ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40 shadow-[0_0_10px_rgba(99,102,241,0.1)]' : 'bg-slate-900/50 text-slate-500 border-white/10 hover:border-white/20'}`}
+                  >
+                    {isActivityVerbalizationEnabled ? 'Abstract: ON' : 'Abstract: OFF'}
+                  </button>
+                  {!isActivityVerbalizationEnabled && (
+                    <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2 duration-300">
+                      <select 
+                        value={selectedActivity} 
+                        onChange={(e) => setSelectedActivity(e.target.value)}
+                        className="bg-black border border-white/10 text-indigo-400 font-mono text-[10px] px-2 py-1.5 focus:outline-none focus:border-indigo-500/50 transition-colors appearance-none cursor-pointer"
+                      >
+                        <option value="walking">Walking</option>
+                        <option value="running">Running</option>
+                        <option value="biking">Biking</option>
+                        <option value="vr rythym">VR Rhythm</option>
+                        <option value="eliptical">Eliptical</option>
+                        <option value="other">Other</option>
+                      </select>
+                      {selectedActivity === 'other' && (
+                        <input 
+                          type="text" 
+                          value={customActivity} 
+                          onChange={(e) => setCustomActivity(e.target.value)}
+                          placeholder="Specify activity..."
+                          className="bg-black border border-white/10 text-indigo-400 font-mono text-[10px] px-2 py-1.5 w-32 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col">

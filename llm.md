@@ -35,11 +35,12 @@ These calls occur immediately after the user clicks **"START SESSION"**.
 *   **Purpose**: Wraps the biometric data in a fictional layer based on the selected Persona.
 *   **Dependencies**: Requires output from *Mission Profile*.
 *   **Context/Input**: 
-    *   Selected Persona (System Instruction).
+    *   Selected Persona (System Instruction & Mission Profile).
     *   Mission Profile text.
-    *   Session Duration.
+    *   Session Context (Duration or Interval structure).
+    *   Activity Context (Conditional).
 *   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting.
-*   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[CONCLUSION]`, `[OVERTIME]`).
+*   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[BONUS]`).
 
 ### C. Session Intro
 *   **Trigger**: Called after the Mission Plan is generated.
@@ -48,8 +49,11 @@ These calls occur immediately after the user clicks **"START SESSION"**.
 *   **Context/Input**: 
     *   Persona Identity.
     *   User Goal.
+    *   Objectives Context (Duration/Intervals).
     *   Narrative Context (if available).
-*   **Output**: A short (<25 words) motivating opening line.
+    *   Telemetry Abstraction Instruction (Conditional).
+    *   Activity Context (Conditional).
+*   **Output**: A short motivating opening line.
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---
@@ -63,16 +67,19 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Purpose**: Immediate coaching feedback on the last minute of performance.
 *   **Dependencies**: Requires at least 1 minute of telemetry.
 *   **Context/Input**:
-    *   **Persona**: Tailored system instruction.
+    *   **Persona**: Tailored system instruction (includes Mission Weight).
+    *   **Goal Context**: User Goal, Mission Profile, Narrative Mission Plan.
+    *   **Telemetry Abstraction Instruction** (Conditional).
+    *   **Activity Context** (Conditional).
     *   **Mid-Term Memory**: The running summary of the session trend.
-    *   **Objective Tracker**: Current progress vs. Goal (Time/Calories/Points).
+    *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
-    *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR.
-*   **Output**: A concise insight string prefixed with a "Saliency Score" (e.g., `Score: 7 | Push harder!`).
+    *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
+*   **Output**: A concise insight string prefixed with a "Saliency Score" (e.g., `Score: [7] | Push harder!`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the Saliency Score >= User's configured Voice Threshold.
 
 ### E. Mid-Term Memory Update
-*   **Trigger**: Immediately **after** the *Minute Analysis* completes (starting from Minute #2).
+*   **Trigger**: Immediately **after** the *Minute Analysis* completes (starting from the first minute packet).
 *   **Purpose**: Summarizes the session history to prevent context window bloat while maintaining a "thread" of the workout's story.
 *   **Dependencies**: Recursive (Depends on the *previous* Mid-Term Memory).
 *   **Context/Input**:
@@ -92,11 +99,18 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
 *   **Purpose**: Provides a professional/thematic debrief of the entire workout.
 *   **Dependencies**: Full session history.
 *   **Context/Input**:
+    *   Persona Identity.
+    *   User Goal + Activity Context.
+    *   Mission Plan / Profile.
+    *   Narrative Mission Plan.
+    *   Telemetry Abstraction Instruction (Conditional).
     *   Total Duration & Metrics (Calories, Heart Points).
+    *   Avg/Peak HR.
     *   Compliance Score (Performance Minutes in Zone).
     *   State Transition History.
     *   Mid-Term Trend.
-*   **Output**: A 2-sentence concluding summary.
+    *   Last Minute Insight.
+*   **Output**: A four-sentence maximum concluding summary.
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---
