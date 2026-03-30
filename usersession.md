@@ -6,8 +6,8 @@ The **User Session Summary** is a concise, human-readable log designed for train
 
 ## 1. Header
 *   **Timestamp**: Date and time of generation.
-*   **Subject Config**: Age, Weight.
-*   **Goals**: Training Goal, specific Objectives (e.g., "Time 20m").
+*   **Subject Config**: Age, Weight, **Activity**.
+*   **Goals**: Training Goal, specific Objectives (e.g., "Time 20m" or "3 Intervals").
 *   **Totals**: Total Calories, Total Heart Points.
 *   **Compliance**: X/Y Active Minutes in target zone.
 *   **Personality**: The persona used (e.g., "Arlie").
@@ -21,6 +21,7 @@ A chronological list of minute-by-minute performance.
 For each minute:
 *   **Index**: Minute number.
 *   **Time**: Wall clock timestamp.
+*   **Active Time**: Time spent in performance states (MM:SS).
 *   **Heart Rate**: Average and Max BPM.
 *   **Metrics**: Calories and Heart Points accumulated in that minute.
 *   **State**: The session state (e.g., `WARMUP`, `MAIN_ACTIVE`).

@@ -19,8 +19,9 @@ AetherAegis is a high-fidelity, sci-fi themed biometric dashboard designed to ga
 ### Prerequisites
 1.  **Telemetry Source**: You need a device or script broadcasting Heart Rate (BPM) data via WebSocket. The default endpoint is `ws://localhost:8080`.
     *   *Note: Ensure your data source sends JSON messages formatted as `{"hr": 120}` or `{"data": {"hr": 120}}`.*
-2.  **API Key**: The application must be running in an environment where a valid Google GenAI API Key is configured via `process.env.API_KEY`.
+2.  **API Key**: The application must be running in an environment where a valid Google GenAI API Key is configured. In the AI Studio Build environment, this is handled automatically.
 3.  **Modern Browser**: Chrome, Edge, or Firefox is recommended for AudioContext and WebSocket support.
+4.  **Full-Stack Environment**: The application can run as a full-stack Express + Vite app for enhanced logging and persistence.
 
 ---
 
@@ -28,16 +29,18 @@ AetherAegis is a high-fidelity, sci-fi themed biometric dashboard designed to ga
 
 The dashboard is divided into three main zones:
 
-1.  **Top Control Bar**: Contains all configuration inputs, toggles for logs/audio, and session control buttons.
+1.  **Top Control Bar**: Contains all configuration inputs, toggles for logs/audio, activity selection, and session control buttons.
 2.  **Main Display (Left)**:
     *   **Live Heart Rate**: Huge digital readout of current BPM.
     *   **Zone Indicator**: Changes color and visual intensity based on your heart rate zone.
-    *   **Session Timer**: Elapsed wall-clock time.
+    *   **Session Metrics**: Real-time tracking of **Heart Points** (intensity-weighted minutes) and **Calories** (based on weight/gender/HR).
+    *   **Session Timer**: Elapsed wall-clock time and "Active Time" (time spent in performance states).
+    *   **Status Badge**: Shows the current **Session State** (INIT, WARMUP, MAIN_ACTIVE, PAUSE, BONUS_ACTIVE, RECOVERY).
     *   **Zone Legend**: Reference list of heart rate zones calculated based on your age.
 3.  **Visualization & Analysis (Right)**:
     *   **Live Chart**: A scrolling area chart showing the last 50 data points. Markers indicate moments where the AI analyzed your performance.
     *   **Aggregator Panel**: A feed of "Minute Packets" showing per-minute stats (Avg/Max HR, Calories, Heart Points) and the AI Coach's analysis.
-4.  **Debug Console (Bottom)**: A collapsible panel showing raw system logs, state transitions, and AI prompts (useful for debugging).
+4.  **Debug Console (Bottom)**: A collapsible panel showing raw system logs, state transitions, and AI prompts. Use the **System/User Log Toggles** to filter the feed.
 
 ---
 
@@ -49,18 +52,26 @@ Before starting, configure your profile in the top bar. Click **"Apply & Persist
 *   **Subject Age**: Critical. Determines your Max Heart Rate (220 - Age) and Zone thresholds.
 *   **Weight (lbs)**: Used for calorie burn calculations.
 *   **Gender**: Used to refine the calorie burn formula.
+*   **Activity**: Select your current activity (Walking, Running, Cycling, or Custom). This provides context to the AI Coach.
 
 ### Mission Parameters
-*   **Training Objective**: Selects the strategy the AI uses to judge you (e.g., "Weight Loss" prioritizes Zone 2, "High Intensity" prioritizes Zone 4/5).
+*   **Training Objective**: Selects the strategy the AI uses to judge you:
+    *   **Metabolic Burn**: Prioritizes Zone 2 for fat oxidation.
+    *   **Strength Training**: Acts as a safety spotter; ignores HR floors but warns if debt is too high.
+    *   **Loose Anaerobic Interval**: Target high-intensity spikes with flexible recovery.
+    *   **Fixed Anaerobic Interval**: Strict time-based intervals (e.g., 3m work / 3m rest).
 *   **Session Target Config**:
     *   **Duration (m)**: Target length of workout in minutes.
-    *   **Heart Points (pt)**: Alternative goal. +1 pt/min for Zone 2-3, +2 pts/min for Zone 4-5.
-    *   **Calories (kc)**: Alternative calorie burn goal.
+    *   **Interval Time (m)**: Duration of each work/rest phase (for Fixed Intervals).
+    *   **Interval Count**: Number of target spikes (for Fixed Intervals).
 *   **Personality**: Selects the AI Coach persona (see [AI Personas](#ai-personas)).
+*   **Telemetry Abstraction**:
+    *   **Enabled (Default)**: The AI uses qualitative descriptors (e.g., "Reactor redlining", "Steady pace") instead of raw BPM numbers.
+    *   **Disabled**: The AI will recite specific BPM values.
 *   **Voice Threshold**: A number from 1-10.
     *   The AI assigns a "Saliency Score" to every insight.
     *   If `Score >= Threshold`, the AI speaks via Text-to-Speech.
-    *   *Lower* values make the coach chattier; *Higher* values restrict voice to urgent alerts only.
+    *   *Lower* values (1-3) make the coach chattier; *Higher* values (7+) restrict voice to urgent alerts only.
 
 ### Connection
 *   **WS Endpoint**: The address of your WebSocket server (e.g., `ws://192.168.1.50:8080`).
@@ -70,17 +81,18 @@ Before starting, configure your profile in the top bar. Click **"Apply & Persist
 
 ## Running a Session
 
-1.  **Connect**: Ensure the Status Badge reads **CONNECTED** (Green). If it reads **CONNECTING** (Amber) or **ERROR** (Red), check your WebSocket server.
+1.  **Connect**: Ensure the Status Badge reads **CONNECTED** (Green).
 2.  **Start**: Click the **START SESSION** button.
-    *   The AI will generate a **Mission Profile** and **Narrative Plan**.
-    *   The AI Coach will speak an intro message.
-    *   The Timer will begin counting.
+    *   **INIT**: The AI generates a **Mission Profile** and **Narrative Plan**.
+    *   **WARMUP**: A 2-minute period (or until target HR is reached) where the AI introduces the mission.
 3.  **During Session**:
-    *   **Monitor**: Watch the Heart Rate Display and Chart.
-    *   **Listen**: The AI will analyze your performance every minute. If it detects a trend or issue (and meets the Voice Threshold), it will speak to you.
+    *   **MAIN_ACTIVE**: The core workout phase. The AI analyzes your performance every minute.
+    *   **PAUSE**: If your heart rate drops below the target zone for 30 seconds, the session enters a "Pause" state.
+    *   **BONUS_ACTIVE**: If your time goal is met but you continue to push, the AI acknowledges your extra effort.
+    *   **RECOVERY**: Once the session ends or you cool down below the target, the AI provides a final wrap-up.
     *   **Full Screen**: Click "Full Screen" to hide controls and focus on the biometrics.
 4.  **Stop**: Click **STOP SESSION**.
-    *   The AI will generate a **Final Report**.
+    *   The AI will generate a **Final Report** summarizing your stats and trends.
     *   Two log files will automatically download to your computer.
 
 ---
@@ -109,9 +121,10 @@ When you stop a session, AetherAegis generates two text files:
 1.  **Session Log** (`session_YYYYMMDD...txt`):
     *   The "Black Box" recording.
     *   Contains full debug traces, raw telemetry arrays per minute, AI prompt chains, token usage, and the full Narrative Mission Plan.
+    *   Includes **Zone Compliance** (Performance Minutes in Zone / Total Active Minutes).
 2.  **User Summary** (`usersession_YYYYMMDD...txt`):
     *   A concise, readable summary.
-    *   Contains the timestamp, stats (Avg/Max HR, Calories), and the Coach's feedback text for each minute. Perfect for keeping a training diary.
+    *   Contains the timestamp, stats (Avg/Max HR, Calories, Heart Points), and the Coach's feedback text for each minute. Perfect for keeping a training diary.
 
 ---
 
