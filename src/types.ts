@@ -27,6 +27,15 @@ export enum SessionState {
   ERROR = 'ERROR'
 }
 
+export interface AiInsightResponse {
+  saliency_score: number;
+  milestone_tag_id: string;
+  coaching_directive: string;
+  persona_narrative: string;
+  tts_instruction: string;
+  perceived_state: string;
+}
+
 export interface MinuteSummary {
   id: string;
   timestamp: string;
@@ -43,6 +52,11 @@ export interface MinuteSummary {
   calories: number;
   tokenUsage?: TokenUsage;
   sessionState?: SessionState;
+  saliencyScore?: number;
+  milestoneTagId?: string;
+  coachingDirective?: string;
+  ttsInstruction?: string;
+  perceivedState?: string;
 }
 
 export enum ConnectionStatus {

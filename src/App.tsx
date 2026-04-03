@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig } from './types';
+import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
 import HeartRateChart from './components/HeartRateChart';
@@ -126,7 +126,7 @@ Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
 Corrections: the input telemetry will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified redline or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. 
-Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. If a milestone is relevant for this update, then put the tag from the brackets [] at the end of the message (debug). 
+Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. 
 Goal: The current state is shown in the objective block. Be sure to remark on state changes when appropriate. In general an update will consiste of a Correction followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the correction should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this. Ensure that pace steering advice is not contradicted by milestone updates.  
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
@@ -134,8 +134,6 @@ Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) 
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
 4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target. Reserve score 6 for narrative only updates. 
 7-10: Critical breach or safety alert. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
-Output format: Score: [X] | [Analysis Text]
-STRICT FORMATTING: Your response MUST start with "Score: [X] |". Do not include any other text, markdown, or headers before this.
 `;
 
 const App: React.FC = () => {
@@ -985,14 +983,21 @@ const App: React.FC = () => {
       }
   }, [addLog]);
 
-  const speakInsight = useCallback(async (text: string, saliencyScore?: number) => {
+  const speakInsight = useCallback(async (text: string, customTtsInstruction?: string) => {
     if (!isVoiceEnabled) return;
     
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const voiceName = personaConfig.voiceName;
     
-    // Use baseline TTS instruction
-    const ttsInstruction = personaConfig.ttsBaselineInstruction;
+    // Use baseline TTS instruction or custom one from LLM
+    const ttsBase = (typeof customTtsInstruction === 'string' ? customTtsInstruction : undefined) || personaConfig.ttsBaselineInstruction;
+
+    // Clean instructions and payload: remove colons and semicolons
+    const cleanTtsBase = ttsBase.replace(/[:;]/g, '');
+    const cleanPayload = text.replace(/[:;]/g, '');
+
+    // Ensure a single colon between instruction and payload
+    const finalTtsPrompt = `${cleanTtsBase}: ${cleanPayload}`;
 
     const maxRetries = 1; // Total attempts = 1 initial + 1 retry
     let attempt = 0;
@@ -1005,7 +1010,7 @@ const App: React.FC = () => {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
           model: "gemini-2.5-flash-preview-tts",
-          contents: [{ parts: [{ text: `${ttsInstruction} ${text}` }] }],
+          contents: [{ parts: [{ text: finalTtsPrompt }] }],
           config: {
             responseModalities: [Modality.AUDIO],
             speechConfig: {
@@ -1288,8 +1293,8 @@ const App: React.FC = () => {
       if (isVoiceEnabled) {
           // Small delay to ensure AudioContext is fully ready after user click
           const cleanIntro = cleanInsightText(introText);
-          // Introduction always uses tts46Instruction (score 5 equivalent)
-          setTimeout(() => speakInsight(cleanIntro, 5), 500);
+          // Introduction uses baseline instruction
+          setTimeout(() => speakInsight(cleanIntro), 500);
       }
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
@@ -1458,8 +1463,8 @@ const App: React.FC = () => {
         // Trigger TTS for final report if voice is enabled
         if (isVoiceEnabled) {
             const cleanReport = cleanInsightText(reportText);
-            // Final reports always use tts46Instruction (score 5 equivalent)
-            speakInsight(cleanReport, 5);
+            // Final reports use baseline instruction
+            speakInsight(cleanReport);
         }
 
     } catch (e) {
@@ -1491,6 +1496,7 @@ const App: React.FC = () => {
     const tailoredSystemInstruction = `Persona: ${personaIdentity}
     Brevity Driver: ${personaConfig.iterationBrevityDriver}
     Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
+    Baseline TTS Instruction: ${personaConfig.ttsBaselineInstruction}
     ${BASE_SYSTEM_INSTRUCTION
         .replace('{{GOAL}}', goalContext + activityContext)
         .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}`;
@@ -1512,14 +1518,14 @@ const App: React.FC = () => {
             historyContext += `[HISTORY: START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
         }
         const prev = allSummaries[0];
-        historyContext += `[HISTORY: PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\n`;
+        historyContext += `[HISTORY: PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
     } else {
         // Packet #3+: History is Packet #N-2 and Packet #N-1
         const prev2 = allSummaries[currentIndex - 2];
         const prev1 = allSummaries[currentIndex - 1];
         
-        historyContext += `[HISTORY: 2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\n\n`;
-        historyContext += `[HISTORY: 1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\n`;
+        historyContext += `[HISTORY: 2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
+        historyContext += `[HISTORY: 1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
     }
     // --- HISTORY BUILDER END ---
 
@@ -1562,8 +1568,22 @@ const App: React.FC = () => {
     memoryContext += `[CURRENT SESSION STATE]: ${summary.sessionState}\n\n`; // Use the frame-based session state
 
 
+    const jsonTask = `
+    [TASK]
+    Generate a coaching insight for the user based on the current minute summary and session context.
+    Return the response as a JSON object with the following structure:
+    {
+      "saliency_score": number, // 1-10 urgency scale. (Fixes over-delivery - replaces current salience score returned at the beginning of the current call) 
+      "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none" (Fixes meta-language leakage - replaces text in brackets at end of current call)
+      "coaching_directive": string, // CRITICAL: 1-5 words max. e.g., "SPEED UP." (Fixes buried coaching - used to clarify history - add this to the history provided to subsequent calls along with the returned text)
+      "persona_narrative": string, // The flavor text, constrained by the lore element. (default payload preceived by the user)
+      "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS. (Acoustic anchoring)
+      "perceived_state": string // Echo: "warmup", "main_active", "recovery" (Debugging tool - have the LLM return the current state that it percieves the user to be in - specify the current state and not an extrapolated future state)
+    }
+    `;
+
     const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- HR Trend (10s): ${hrTrend}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}`;
+    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- HR Trend (10s): ${hrTrend}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}\n\n${jsonTask}`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
@@ -1572,22 +1592,58 @@ const App: React.FC = () => {
       const response = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
-          undefined, // No config needed (prompt contains tailored system instruction)
+          { responseMimeType: 'application/json' },
           1, // 1 Retry
           'AI_INSIGHT'
       );
 
       const tokenUsage = extractUsage(response);
-      const insight = response.text || "Insight unavailable.";
+      const insightRaw = response.text || "{}";
       addLog(`AI_RESPONSE: Analysis complete.`);
-      addLog(`AI_INSIGHT: "${insight}"`);
+      addLog(`AI_INSIGHT_JSON: ${insightRaw}`);
       if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+
+      let insightData: any;
+      try {
+        insightData = JSON.parse(insightRaw);
+        // Handle case where LLM returns an array of objects
+        if (Array.isArray(insightData) && insightData.length > 0) {
+          insightData = insightData[0];
+        }
+        
+        // Ensure all required fields exist, providing defaults if missing
+        // Default saliency_score to 10 if missing to ensure voicing as per user request
+        if (typeof insightData.saliency_score !== 'number') insightData.saliency_score = 10;
+        if (!insightData.milestone_tag_id) insightData.milestone_tag_id = "none";
+        if (!insightData.coaching_directive) insightData.coaching_directive = "MAINTAIN";
+        if (!insightData.persona_narrative) insightData.persona_narrative = insightRaw;
+        if (!insightData.tts_instruction) insightData.tts_instruction = personaConfig.ttsBaselineInstruction;
+        if (!insightData.perceived_state) insightData.perceived_state = summary.sessionState || "unknown";
+      } catch (e) {
+        addLog(`AI_ERROR: JSON parse failed. Raw: ${insightRaw}`);
+        insightData = {
+          saliency_score: 10, // Default to high score to ensure voicing on failure
+          milestone_tag_id: "none",
+          coaching_directive: "MAINTAIN",
+          persona_narrative: insightRaw,
+          tts_instruction: personaConfig.ttsBaselineInstruction,
+          perceived_state: summary.sessionState || "unknown"
+        };
+      }
+
+      const insight = insightData.persona_narrative;
 
       // Update the log history ref with the new insight and prompt
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
+        allSessionSummariesRef.current[logIndex].saliencyScore = insightData.saliency_score;
+        allSessionSummariesRef.current[logIndex].milestoneTagId = insightData.milestone_tag_id;
+        allSessionSummariesRef.current[logIndex].coachingDirective = insightData.coaching_directive;
+        allSessionSummariesRef.current[logIndex].ttsInstruction = insightData.tts_instruction;
+        allSessionSummariesRef.current[logIndex].perceivedState = insightData.perceived_state;
+
         // Store structured memory context snapshot
         if (currentSessionContextRef.current) {
             allSessionSummariesRef.current[logIndex].sessionContextSummary = currentSessionContextRef.current; 
@@ -1600,6 +1656,11 @@ const App: React.FC = () => {
         s.id === summary.id ? { 
             ...s, 
             insight, 
+            saliencyScore: insightData.saliency_score,
+            milestoneTagId: insightData.milestone_tag_id,
+            coachingDirective: insightData.coaching_directive,
+            ttsInstruction: insightData.tts_instruction,
+            perceivedState: insightData.perceived_state,
             isAnalyzing: false, 
             prompt, 
             sessionContextSummary: currentSessionContextRef.current || undefined, 
@@ -1607,22 +1668,16 @@ const App: React.FC = () => {
         } : s
       ));
 
-      // Extract Saliency Score from Insight Text for logic processing
-      // Expected Format: "Score: [X] | ..."
-      const scoreMatch = insight.match(/^Score:\s*\[?([\d.]+)\]?\s*\|/i);
-      const saliencyScore = scoreMatch ? parseFloat(scoreMatch[1]) : 0;
-
-      // Clean text for TTS and Display
-      const cleanText = cleanInsightText(insight);
-
-      // Trigger TTS if enabled AND score meets threshold
-      if (isVoiceEnabled) {
-        if (saliencyScore >= chattiness) {
-          speakInsight(cleanText, saliencyScore);
-        } else {
-          addLog(`VOICE_SKIP: Insight Score (${saliencyScore}) < Threshold (${chattiness}).`);
-        }
+      // Speak the narrative with the custom TTS instruction if it meets the chattiness threshold
+      if (insightData.saliency_score >= chattiness) {
+          speakInsight(insight, insightData.tts_instruction);
+      } else {
+          addLog(`VOICE_SKIP: Insight Score (${insightData.saliency_score}) < Threshold (${chattiness}).`);
       }
+      
+      // Update the user session log with relevant data (extracting from JSON to match old format)
+      const logEntry = `AI_INSIGHT: Minute ${summary.id}: [Score ${insightData.saliency_score}] ${insightData.persona_narrative}${insightData.milestone_tag_id !== 'none' ? ` [${insightData.milestone_tag_id}]` : ''}`;
+      addLog(logEntry);
     } catch (e) {
       addLog(`AI_ERROR: Failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
       
@@ -1763,7 +1818,7 @@ const App: React.FC = () => {
     }
 
     const newSummary: MinuteSummary = {
-      id: crypto.randomUUID(),
+      id: String(allSessionSummariesRef.current.length + 1),
       timestamp,
       avg: avgHr,
       max: maxVal,
@@ -2088,7 +2143,7 @@ const App: React.FC = () => {
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       // System categories regex
-      const isSystem = log.message.match(/^(SYSTEM|ERROR|WARNING|AUDIO|VOICE_WARN|VOICE_ERROR|AI_USAGE|AI_REQUEST|TELEMETRY|STATE_CHANGE|\[)/);
+      const isSystem = log.message.match(/^(SYSTEM|ERROR|WARNING|AUDIO|VOICE_WARN|VOICE_ERROR|AI_USAGE|AI_REQUEST|AI_INSIGHT_JSON|TELEMETRY|STATE_CHANGE|\[)/);
       if (isSystem) return showSystemLogs;
       // All others (SESSION, METRICS, AI_INSIGHT, etc.) are considered User Logs
       return showUserLogs;
