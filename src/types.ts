@@ -74,7 +74,6 @@ export interface PersonaConfig {
   missionProfile: string;
   missionWeight: number;
   voiceName: string;
-  tts13Instruction: string;
-  tts46Instruction: string;
-  tts70Instruction: string;
+  ttsBaselineInstruction: string;
+  iterationBrevityDriver: string;
 }

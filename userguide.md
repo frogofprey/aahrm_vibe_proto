@@ -84,7 +84,7 @@ Before starting, configure your profile in the top bar. Click **"Apply & Persist
 1.  **Connect**: Ensure the Status Badge reads **CONNECTED** (Green).
 2.  **Start**: Click the **START SESSION** button.
     *   **INIT**: The AI generates a **Mission Profile** and **Narrative Plan**.
-    *   **WARMUP**: A 2-minute period (or until target HR is reached) where the AI introduces the mission.
+    *   **WARMUP**: A 3-minute period (or 6 minutes for intervals, or until target HR is reached) where the AI introduces the mission.
 3.  **During Session**:
     *   **MAIN_ACTIVE**: The core workout phase. The AI analyzes your performance every minute.
     *   **PAUSE**: If your heart rate drops below the target zone for 30 seconds, the session enters a "Pause" state.

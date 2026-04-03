@@ -401,7 +401,7 @@ const App: React.FC = () => {
 
           if (currentSessionState === SessionState.INIT || currentSessionState === SessionState.WARMUP) {
               // Warmup to Main Active
-              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+              const isWarmupComplete = elapsedMinutes >= 6.0 || (currentBPM || 0) >= targetMinBPM;
               if (isWarmupComplete) {
                   if (!transitionTimersRef.current.warmupToMain) {
                       transitionTimersRef.current.warmupToMain = now;
@@ -462,7 +462,7 @@ const App: React.FC = () => {
 
           if (currentSessionState === SessionState.INIT || currentSessionState === SessionState.WARMUP) {
               // Warmup to Main Active (Time or HR)
-              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+              const isWarmupComplete = elapsedMinutes >= 6.0 || (currentBPM || 0) >= targetMinBPM;
               if (isWarmupComplete) {
                   if (!transitionTimersRef.current.warmupToMain) {
                       transitionTimersRef.current.warmupToMain = now;
@@ -529,8 +529,8 @@ const App: React.FC = () => {
           // --- Main Workout Phase (Goals Not Met Yet or Warming Up) ---
           
           if (currentSessionState === SessionState.WARMUP || currentSessionState === SessionState.INIT) {
-              // Transition Trigger: Time > 2.0 OR HR >= TargetMin
-              const isWarmupComplete = elapsedMinutes >= 2.0 || (currentBPM || 0) >= targetMinBPM;
+              // Transition Trigger: Time > 3.0 OR HR >= TargetMin
+              const isWarmupComplete = elapsedMinutes >= 3.0 || (currentBPM || 0) >= targetMinBPM;
 
               if (isWarmupComplete) {
                    // Start Debounce
@@ -991,13 +991,8 @@ const App: React.FC = () => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const voiceName = personaConfig.voiceName;
     
-    // Select TTS instruction based on saliency score
-    let ttsInstruction = personaConfig.tts46Instruction; // Default to mid-range
-    if (saliencyScore !== undefined) {
-        if (saliencyScore >= 7) ttsInstruction = personaConfig.tts70Instruction;
-        else if (saliencyScore >= 4) ttsInstruction = personaConfig.tts46Instruction;
-        else if (saliencyScore >= 1) ttsInstruction = personaConfig.tts13Instruction;
-    }
+    // Use baseline TTS instruction
+    const ttsInstruction = personaConfig.ttsBaselineInstruction;
 
     const maxRetries = 1; // Total attempts = 1 initial + 1 retry
     let attempt = 0;
@@ -1265,8 +1260,8 @@ const App: React.FC = () => {
     ${abstractionInstruction}
 
     Task: The user has just started a workout session. Generate an introduction to initiate the session.
-    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately.
-    Constraint: Strictly adhere to persona.
+    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. 
+    Constraint: Strictly adhere to persona. Four sentence maximum output.
     `;
 
     try {
@@ -1494,6 +1489,7 @@ const App: React.FC = () => {
         : "";
 
     const tailoredSystemInstruction = `Persona: ${personaIdentity}
+    Brevity Driver: ${personaConfig.iterationBrevityDriver}
     Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
     ${BASE_SYSTEM_INSTRUCTION
         .replace('{{GOAL}}', goalContext + activityContext)

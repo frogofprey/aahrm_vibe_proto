@@ -7,7 +7,7 @@ In this mode, the system tracks "Performance Minutes"—time spent in `MAIN_ACTI
 
 ## 2. State Definitions
 *   **INIT**: Initializing session and generating AI mission plans.
-*   **WARMUP**: Initial 2-minute ramp-up period.
+*   **WARMUP**: Initial 3-minute ramp-up period.
 *   **MAIN_ACTIVE**: The primary workout phase where goals are being pursued.
 *   **PAUSE**: Triggered when HR drops below the target zone for an extended period.
 *   **BONUS_ACTIVE**: Triggered when the duration goal is met but the user maintains intensity.
@@ -20,7 +20,7 @@ stateDiagram-v2
     [*] --> INIT
     INIT --> WARMUP: Time > 6s
     
-    WARMUP --> MAIN_ACTIVE: HR >= Target OR Time > 2m
+    WARMUP --> MAIN_ACTIVE: HR >= Target OR Time > 3m
     
     state "Workout Phase (Goal Not Met)" as Workout {
         MAIN_ACTIVE --> PAUSE: HR < Target (30s)
@@ -39,7 +39,7 @@ stateDiagram-v2
 ```
 
 ## 4. Logic Details
-*   **Warmup to Main**: Requires 5 seconds of sustained target HR or reaching the 2-minute wall-clock limit.
+*   **Warmup to Main**: Requires 5 seconds of sustained target HR or reaching the 3-minute wall-clock limit.
 *   **Main to Pause**: Requires 30 seconds of sustained HR below the target floor.
 *   **Pause to Main**: Requires 5 seconds of sustained HR at or above the target floor.
 *   **Goal Completion**: Once `PerformanceMinutes >= DurationGoal`, the system switches to "Post-Workout" logic, where the user is either in `BONUS_ACTIVE` (pushing) or `RECOVERY` (cooling down).

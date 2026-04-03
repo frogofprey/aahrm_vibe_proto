@@ -21,7 +21,7 @@ stateDiagram-v2
     [*] --> INIT
     INIT --> WARMUP: Time > 6s
     
-    WARMUP --> MAIN_ACTIVE: HR >= Target (5s) OR Time > 2m
+    WARMUP --> MAIN_ACTIVE: HR >= Target (5s) OR Time > 6m
     
     state "Interval Loop" as Loop {
         MAIN_ACTIVE --> RECOVERY: HR < Target (10s)
@@ -42,7 +42,7 @@ stateDiagram-v2
     [*] --> INIT
     INIT --> WARMUP: Time > 6s
     
-    WARMUP --> MAIN_ACTIVE: HR >= Target (5s) OR Time > 2m
+    WARMUP --> MAIN_ACTIVE: HR >= Target (5s) OR Time > 6m
     
     state "Timed Loop" as TimedLoop {
         MAIN_ACTIVE --> RECOVERY: Time in State >= IntervalTime
