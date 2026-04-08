@@ -126,7 +126,7 @@ Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
 Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
 Corrections: the input telemetry will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified redline or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. 
-Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. 
+Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. HARD CONSTRAINT: Do NOT process milestones during warmup state. 
 Goal: The current state is shown in the objective block. Be sure to remark on state changes when appropriate. In general an update will consiste of a Correction followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the correction should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this. Ensure that pace steering advice is not contradicted by milestone updates.  
 Mission Plan: {{GOAL}}
 Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
@@ -328,10 +328,10 @@ const App: React.FC = () => {
             addLog(`SYSTEM: Active Timer Engaged.`);
         }
 
-        // Interval State Strategy: Increment count on MAIN_ACTIVE -> RECOVERY
+        // Interval State Strategy: Increment count on MAIN_ACTIVE/BONUS_ACTIVE -> RECOVERY
         const strategy = (currentObjective as any).transitionStrategy || "normal state";
         if (strategy === "interval state" || strategy === "fixed interval state") {
-            if (currentSessionStateRef.current === SessionState.MAIN_ACTIVE && newState === SessionState.RECOVERY) {
+            if ((currentSessionStateRef.current === SessionState.MAIN_ACTIVE || currentSessionStateRef.current === SessionState.BONUS_ACTIVE) && newState === SessionState.RECOVERY) {
                 setIntervalCount(prev => prev + 1);
                 addLog(`SYSTEM: Interval ${intervalCount + 1} completed.`);
             }
@@ -413,13 +413,13 @@ const App: React.FC = () => {
                       transitionState(SessionState.WARMUP, "Initialization complete");
                   }
               }
-          } else if (currentSessionState === SessionState.MAIN_ACTIVE) {
-              // Main Active to Recovery (Valley)
+          } else if (currentSessionState === SessionState.MAIN_ACTIVE || currentSessionState === SessionState.BONUS_ACTIVE) {
+              // Main Active or Bonus Active to Recovery (Valley)
               const isDrop = (currentBPM || 0) < targetMinBPM;
               if (isDrop) {
                   if (!transitionTimersRef.current.mainToPause) {
                       transitionTimersRef.current.mainToPause = now;
-                  } else if (now - transitionTimersRef.current.mainToPause > 10000) { // 10s debounce for interval drop
+                  } else if (now - transitionTimersRef.current.mainToPause > 6000) { // 6s debounce for interval drop
                       transitionState(SessionState.RECOVERY, "HR below target (Interval Valley)");
                       transitionTimersRef.current.mainToPause = null;
                   }
@@ -427,13 +427,15 @@ const App: React.FC = () => {
                   transitionTimersRef.current.mainToPause = null;
               }
           } else if (currentSessionState === SessionState.RECOVERY) {
-              // Recovery to Main Active (Spike)
+              // Recovery to Main Active or Bonus Active (Spike)
               const isSpike = (currentBPM || 0) >= targetMinBPM;
               if (isSpike) {
                   if (!transitionTimersRef.current.pauseToMain) {
                       transitionTimersRef.current.pauseToMain = now;
-                  } else if (now - transitionTimersRef.current.pauseToMain > 5000) {
-                      transitionState(SessionState.MAIN_ACTIVE, "HR recovered to target (Interval Spike)");
+                  } else if (now - transitionTimersRef.current.pauseToMain > 6000) {
+                      const targetState = intervalCount < intervalCountGoal ? SessionState.MAIN_ACTIVE : SessionState.BONUS_ACTIVE;
+                      const reason = intervalCount < intervalCountGoal ? "HR recovered to target (Interval Spike)" : "HR recovered to target (Bonus Interval Spike)";
+                      transitionState(targetState, reason);
                       transitionTimersRef.current.pauseToMain = null;
                   }
               } else {
@@ -474,20 +476,37 @@ const App: React.FC = () => {
                       transitionState(SessionState.WARMUP, "Initialization complete");
                   }
               }
-          } else if (currentSessionState === SessionState.MAIN_ACTIVE) {
-              // Main Active to Recovery (Time based)
-              if (timeInStateMinutes >= intervalTime) {
-                  transitionState(SessionState.RECOVERY, `Fixed Interval (${intervalTime}m) complete`);
+          } else if (currentSessionState === SessionState.MAIN_ACTIVE || currentSessionState === SessionState.BONUS_ACTIVE) {
+              // Main Active or Bonus Active to Recovery (HR based)
+              const isDrop = (currentBPM || 0) < targetMinBPM;
+              if (isDrop) {
+                  if (!transitionTimersRef.current.mainToPause) {
+                      transitionTimersRef.current.mainToPause = now;
+                  } else if (now - transitionTimersRef.current.mainToPause > 6000) {
+                      const stateLabel = currentSessionState === SessionState.MAIN_ACTIVE ? "Fixed Interval" : "Bonus Interval";
+                      transitionState(SessionState.RECOVERY, `${stateLabel} HR below target (Interval Valley)`);
+                      transitionTimersRef.current.mainToPause = null;
+                  }
+              } else {
+                  transitionTimersRef.current.mainToPause = null;
               }
           } else if (currentSessionState === SessionState.RECOVERY) {
-              // Recovery to Main Active (Time based)
-              if (timeInStateMinutes >= intervalTime) {
-                  if (intervalCount < intervalCountGoal) {
-                      transitionState(SessionState.MAIN_ACTIVE, `Fixed Recovery (${intervalTime}m) complete`);
-                  } else {
-                      // Session complete? Or just stay in recovery?
-                      // Let's just stay in RECOVERY for now.
+              // Recovery to Main Active or Bonus Active (HR based)
+              const isSpike = (currentBPM || 0) >= targetMinBPM;
+              if (isSpike) {
+                  if (!transitionTimersRef.current.pauseToMain) {
+                      transitionTimersRef.current.pauseToMain = now;
+                  } else if (now - transitionTimersRef.current.pauseToMain > 6000) {
+                      if (intervalCount < intervalCountGoal) {
+                          transitionState(SessionState.MAIN_ACTIVE, `Fixed Recovery HR recovered to target (Interval Spike)`);
+                      } else {
+                          // Goal met, but user wants more! Transition to BONUS_ACTIVE
+                          transitionState(SessionState.BONUS_ACTIVE, `Bonus Recovery HR recovered to target (Bonus Interval Spike)`);
+                      }
+                      transitionTimersRef.current.pauseToMain = null;
                   }
+              } else {
+                  transitionTimersRef.current.pauseToMain = null;
               }
           }
           return;
@@ -766,6 +785,9 @@ const App: React.FC = () => {
     contentDebug += `OBJECTIVES: ${activeObjectiveStr}\n`;
     contentDebug += `TOTAL CALORIES BURNED: ${totalCalories.toFixed(1)} kcal\n`;
     contentDebug += `TOTAL HEART POINTS: ${totalPoints}\n`;
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        contentDebug += `INTERVALS COMPLETED: ${intervalCount} / ${intervalCountGoal}\n`;
+    }
     contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
     contentDebug += `Personality: ${selectedPersona}\n`;
@@ -844,6 +866,7 @@ const App: React.FC = () => {
         }
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
+        contentDebug += `   > AI JSON    : ${s.rawJson || "N/A"}\n`;
         if (s.tokenUsage) {
             contentDebug += `   > TOKENS     : In ${s.tokenUsage.input} | Out ${s.tokenUsage.output} | Tot ${s.tokenUsage.total}\n`;
         }
@@ -869,6 +892,9 @@ const App: React.FC = () => {
     contentUser += `Objectives: ${activeObjectiveStr}\n`;
     contentUser += `Total Calories: ${totalCalories.toFixed(1)} kcal\n`;
     contentUser += `Total Heart Points: ${totalPoints}\n`;
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        contentUser += `Intervals Completed: ${intervalCount} / ${intervalCountGoal}\n`;
+    }
     contentUser += `Zone Compliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} active minutes\n`;
     contentUser += `Personality: ${selectedPersona}\n`;
     contentUser += `--------------------------------------------------\n\n`;
@@ -884,6 +910,7 @@ const App: React.FC = () => {
             contentUser += `Minute ${index + 1} (${s.timestamp}): Avg ${s.avg} BPM | Max ${s.max} BPM\n`;
             contentUser += `Metrics: ${s.calories.toFixed(1)} kcal, ${s.heartPoints} HP\n`;
             contentUser += `State: ${s.sessionState}\n`;
+            contentUser += `Saliency Score: ${s.saliencyScore ?? "N/A"} | Coaching: ${s.coachingDirective || "N/A"}\n`;
             contentUser += `Coach: "${s.insight || "N/A"}"\n\n`;
         });
     }
@@ -914,7 +941,7 @@ const App: React.FC = () => {
     
     addLog(`SYSTEM: Log files generated: ${filenameDebug} & ${filenameUser}`);
     addLog(`NOTE: Files saved to browser default downloads folder.`);
-  }, [age, weight, gender, currentObjective, sessionDurationGoal, deviceIdHex, selectedPersona, chattiness, isTelemetryAbstractionEnabled, addLog]);
+  }, [age, weight, gender, currentObjective, sessionDurationGoal, deviceIdHex, selectedPersona, chattiness, isTelemetryAbstractionEnabled, addLog, intervalCount, intervalCountGoal, intervalTime]);
 
   // --- Audio Queue Processor ---
   const processAudioQueue = useCallback(async () => {
@@ -1413,6 +1440,7 @@ const App: React.FC = () => {
     Task: The workout session has ended. Generate a final session report based on the context below. Use only prose and don't include any markdown tags in the output. Output will be read by a TTS so ensure that it won't sound like "reading a phonebook". Four sentence maximum output. 
     
     Constraints: 
+    - State if the user has satisfied the workout requirements with respect to time spent and/or zone compliance. Don't be afraid to note if requirements have not been met. 
     - Professional, summary-focused, and concluding. 
     - Be generous with the ending workout stats. 
     - Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss and Maguffin. 
@@ -1470,7 +1498,7 @@ const App: React.FC = () => {
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal]);
 
   const requestAiInsight = async (summary: MinuteSummary) => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1573,12 +1601,12 @@ const App: React.FC = () => {
     Generate a coaching insight for the user based on the current minute summary and session context.
     Return the response as a JSON object with the following structure:
     {
-      "saliency_score": number, // 1-10 urgency scale. (Fixes over-delivery - replaces current salience score returned at the beginning of the current call) 
-      "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none" (Fixes meta-language leakage - replaces text in brackets at end of current call)
-      "coaching_directive": string, // CRITICAL: 1-5 words max. e.g., "SPEED UP." (Fixes buried coaching - used to clarify history - add this to the history provided to subsequent calls along with the returned text)
-      "persona_narrative": string, // The flavor text, constrained by the lore element. (default payload preceived by the user)
-      "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS. (Acoustic anchoring)
-      "perceived_state": string // Echo: "warmup", "main_active", "recovery" (Debugging tool - have the LLM return the current state that it percieves the user to be in - specify the current state and not an extrapolated future state)
+      "saliency_score": number,  
+      "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none"
+      "coaching_directive": string, // CRITICAL: one of the following: "MAINTAIN_PACE", "INCREASE_EFFORT", "DECREASE_EFFORT", "EMERGENCY_STOP", "PREPARE_TRANSITION"
+      "persona_narrative": string, // The flavor text, constrained by the lore element.
+      "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS.
+      "perceived_state": string // Echo: "warmup", "main_active", "recovery" , "bonus_active" , "pause" , "error"
     }
     `;
 
@@ -1643,6 +1671,7 @@ const App: React.FC = () => {
         allSessionSummariesRef.current[logIndex].coachingDirective = insightData.coaching_directive;
         allSessionSummariesRef.current[logIndex].ttsInstruction = insightData.tts_instruction;
         allSessionSummariesRef.current[logIndex].perceivedState = insightData.perceived_state;
+        allSessionSummariesRef.current[logIndex].rawJson = insightRaw;
 
         // Store structured memory context snapshot
         if (currentSessionContextRef.current) {
@@ -1661,6 +1690,7 @@ const App: React.FC = () => {
             coachingDirective: insightData.coaching_directive,
             ttsInstruction: insightData.tts_instruction,
             perceivedState: insightData.perceived_state,
+            rawJson: insightRaw,
             isAnalyzing: false, 
             prompt, 
             sessionContextSummary: currentSessionContextRef.current || undefined, 
@@ -1847,7 +1877,7 @@ const App: React.FC = () => {
         generateSessionSummary();
     }
 
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective, currentSessionState]);
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective, currentSessionState, intervalCount, intervalCountGoal]);
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);

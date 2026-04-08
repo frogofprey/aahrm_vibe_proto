@@ -57,6 +57,7 @@ export interface MinuteSummary {
   coachingDirective?: string;
   ttsInstruction?: string;
   perceivedState?: string;
+  rawJson?: string;
 }
 
 export enum ConnectionStatus {

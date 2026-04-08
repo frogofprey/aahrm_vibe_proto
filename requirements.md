@@ -29,11 +29,11 @@
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**:
     *   **Wall Clock**: Display the total elapsed time of the session in `HH:MM:SS` format.
-    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP` or `PAUSE` must not count towards the Time Objective. *For Interval Strategies, `RECOVERY` periods are included in Performance Duration.*
+    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP` or `PAUSE` must not count towards the Time Objective. *For Interval Strategies, `RECOVERY` periods are included in Performance Duration as they are integral to the interval cycle.*
 *   **Metric Tracking**:
     *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5. *Accumulates during ALL states (including Warmup/Recovery).*
     *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender). *Accumulates during ALL states.*
-    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. This ensures users are not penalized for non-performance states (Warmup/Recovery). *For Interval Strategies, compliance includes Recovery periods where HR is below the target zone floor.*
+    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. This ensures users are not penalized for non-performance states (Warmup/Recovery). *For Interval Strategies, compliance includes Recovery periods where HR is below the target zone floor, as these are planned valleys.*
     *   **Gender Input**: Added selector (Male/Female) to support accurate calorie calculation.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal (including **Interval Count** and **Interval Time** if applicable).
@@ -51,7 +51,7 @@
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
         *   Contains full debug details, prompts, raw telemetry, mission profile, **narrative mission plan**, mid-term memory, and final report diagnostics.
-        *   Header must include Subject Age, **Subject Weight**, **Subject Gender**, Training Objective, **Session Objectives** (Time, HP, Kcal, **Intervals**).
+        *   Header must include Subject Age, **Subject Weight**, **Subject Gender**, Training Objective, **Session Objectives** (Time, HP, Kcal, **Intervals**), and **Intervals Completed** (if applicable).
         *   Body must include per-minute breakdown of Calories and Heart Points.
     2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
         *   A concise summary suitable for long-term memory systems.
@@ -61,7 +61,7 @@
 ### 1.4 AI Coaching & Aggregation
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
     *   **Frame State Priority**: The "State" of a minute is determined by the highest priority state observed during that minute: `ERROR` > `PAUSE` > `RECOVERY` > `BONUS_ACTIVE` > `MAIN_ACTIVE` > `WARMUP`.
-    *   **Majority State**: For Interval Strategies, the "State" of a minute is determined by the majority state observed during that minute to ensure accurate labeling of transitions.
+    *   **Majority State**: For Interval Strategies, the "State" of a minute is determined by the majority state observed during that minute to ensure accurate labeling of transitions (e.g., a minute that is 40s Recovery and 20s Active is labeled as Recovery).
     *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), Sample Count, Frame State, Raw value array.
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
@@ -156,12 +156,13 @@ The application implements a state machine to track the user's workout phase. Tr
             *   If HR >= Target Min -> `BONUS_ACTIVE`.
             *   If HR < Target Min -> `RECOVERY` (Debounce: 5s).
     3.  **Interval Strategy**:
-        *   Alternates between `MAIN_ACTIVE` and `RECOVERY` based on HR thresholds.
-        *   Transitions to `RECOVERY` when HR exceeds a ceiling or after a set time.
-        *   Transitions back to `MAIN_ACTIVE` when HR drops below a recovery floor.
+        *   Purely heart rate-based transitions between `MAIN_ACTIVE` and `RECOVERY`.
+        *   **Active to Recovery**: Transitions to `RECOVERY` when HR stays below the target zone minimum for **6 seconds** (Debounce).
+        *   **Recovery to Active**: Transitions back to `MAIN_ACTIVE` (or `BONUS_ACTIVE` if goal met) when HR stays above the target zone minimum for **6 seconds** (Debounce).
+        *   **Bonus Intervals**: Corrected logic to allow continuous interval tracking (Active <-> Recovery) even after the initial interval goal is reached.
     4.  **Fixed Interval Strategy**:
-        *   Alternates between `MAIN_ACTIVE` and `RECOVERY` based on fixed time durations.
-        *   Increments interval count upon transition from `MAIN_ACTIVE` to `RECOVERY`.
+        *   Follows the same HR-based transition logic as the standard Interval Strategy (6-second debounce).
+        *   Increments interval count upon transition from `MAIN_ACTIVE` (or `BONUS_ACTIVE`) to `RECOVERY`.
 
 ## 2. Non-Functional Requirements
 

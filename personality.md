@@ -37,19 +37,15 @@ interface PersonaConfig {
   voiceName: string;
 
   /**
-   * TTS instructions for low-saliency responses (Score 1-3).
+   * The baseline TTS instruction for the persona.
    */
-  tts13Instruction: string;
+  ttsBaselineInstruction: string;
 
   /**
-   * TTS instructions for mid-saliency responses (Score 4-6).
+   * A string instruction to drive the brevity and style of the AI's 
+   * responses during the session.
    */
-  tts46Instruction: string;
-
-  /**
-   * TTS instructions for high-saliency responses (Score 7-10).
-   */
-  tts70Instruction: string;
+  iterationBrevityDriver: string;
 }
 ```
 
@@ -61,8 +57,7 @@ interface PersonaConfig {
   "missionProfile": "You consider this session a military defense...",
   "missionWeight": 0.4,
   "voiceName": "Zebenelgenubi",
-  "tts13Instruction": "Use a deep, gravelly delivery...",
-  "tts46Instruction": "Use a deep, authoritative delivery...",
-  "tts70Instruction": "Use an explosively loud delivery..."
+  "ttsBaselineInstruction": "Use a deep, gravelly, authoritative delivery...",
+  "iterationBrevityDriver": "Keep reports tactical and brief. Focus on mission status."
 }
 ```
