@@ -1,123 +1,35 @@
 import React from 'react';
-import { ZoneConfig } from '../types';
+import { Heart } from 'lucide-react';
 
 interface HeartRateDisplayProps {
-  hr: number | null;
-  zone: ZoneConfig | null;
-  elapsedTime: string;
-  activeTime: string;
-  latestInsight?: string;
-  isFullScreen?: boolean;
-  hrTrend?: string;
-  intervalCount?: number;
+  currentHR: number | null;
+  hrTrend: string;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, activeTime, latestInsight, isFullScreen, hrTrend, intervalCount }) => {
-  const displayValue = hr !== null ? hr : '--';
-  
-  // Neutral fallbacks for when no zone is matched or no data is present
-  const defaultBorder = 'border-slate-800';
-  const defaultGlow = 'shadow-none';
-  const defaultLabel = 'Live Heart Rate (BPM)';
-  const defaultTextColor = 'text-slate-700';
-
-  // Pulse duration calculation: 60 / HR
-  const pulseDuration = hr && hr > 0 ? `${60 / hr}s` : '1.5s';
-
+export const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ currentHR, hrTrend }) => {
   return (
-    <div className={`h-full flex flex-col justify-center items-center p-8 bg-slate-950/40 border transition-all duration-700 backdrop-blur-sm relative overflow-hidden
-      ${zone ? zone.borderClass : defaultBorder} 
-      ${zone ? zone.glowClass : defaultGlow}`}
-    >
-      {/* Dynamic Background Accent */}
-      {zone && (
-        <div 
-          className="absolute inset-0 opacity-5 transition-opacity duration-1000"
-          style={{ background: `radial-gradient(circle at center, ${zone.color} 0%, transparent 70%)` }}
-        />
-      )}
-
-      {/* Visceral Pulse Icon */}
-      <div className="absolute top-6 right-6 z-20">
-        <div 
-          className="w-4 h-4 rounded-full animate-heartbeat"
-          style={{ 
-            backgroundColor: zone ? zone.color : (hr ? '#ff003c' : '#1e293b'),
-            animationDuration: pulseDuration,
-            boxShadow: `0 0 10px ${zone ? zone.color : '#ff003c'}`
-          }}
-        />
-      </div>
-
-      <div className={`text-xs uppercase tracking-widest font-bold mb-4 z-10 transition-colors duration-500 ${zone ? zone.textClass : 'text-slate-500 opacity-70'}`}>
-        {zone ? zone.label : defaultLabel}
-      </div>
+    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 flex flex-col items-center justify-center relative overflow-hidden group">
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rose-500/20 to-transparent" />
       
-      <div className="flex items-baseline gap-2 z-10">
-        <span className={`text-9xl font-black font-mono tracking-tighter transition-all duration-500 ${hr !== null ? (zone ? 'text-white' : 'text-slate-400') : defaultTextColor}`}>
-          {displayValue}
+      <div className="flex items-center gap-2 mb-2">
+        <Heart className={`w-4 h-4 text-rose-500 ${currentHR ? 'animate-pulse' : ''}`} />
+        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live Heart Rate</span>
+      </div>
+
+      <div className="flex items-baseline gap-1">
+        <span className="text-7xl font-mono font-black text-slate-100 tracking-tighter tabular-nums">
+          {currentHR || '--'}
         </span>
-        <div className="flex flex-col">
-          <span className={`text-2xl font-bold uppercase transition-colors duration-500 ${zone ? zone.textClass : 'text-slate-700'}`}>BPM</span>
-          {hrTrend && (
-            <span className={`text-[10px] font-bold uppercase tracking-widest mt-1 ${
-              hrTrend.includes('Increase') ? 'text-red-500' : 
-              hrTrend.includes('Decrease') ? 'text-blue-500' : 
-              'text-slate-500'
-            }`}>
-              {hrTrend}
-            </span>
-          )}
-        </div>
+        <span className="text-xl font-bold text-slate-500 uppercase tracking-tight">BPM</span>
       </div>
 
-      {/* Session Timer */}
-      <div className="mt-6 z-10 flex flex-col items-center">
-        <span className="text-[9px] text-slate-500 uppercase tracking-[0.2em] mb-1">Session Timer</span>
-        <div className={`text-xl font-mono font-bold tracking-widest ${elapsedTime !== "00:00:00" ? 'text-white' : 'text-slate-600'}`}>
-            {elapsedTime}
-        </div>
-        {activeTime !== "00:00" && (
-          <div className="mt-2 flex flex-col items-center">
-            <span className="text-[9px] text-cyan-500/70 uppercase tracking-[0.2em] mb-1">Active Time</span>
-            <div className="text-2xl font-mono font-bold tracking-widest text-cyan-400">
-                {activeTime}
-            </div>
-          </div>
-        )}
-        {intervalCount !== undefined && intervalCount > 0 && (
-          <div className="mt-2 flex flex-col items-center">
-            <span className="text-[9px] text-orange-500/70 uppercase tracking-[0.2em] mb-1">Intervals</span>
-            <div className="text-2xl font-mono font-bold tracking-widest text-orange-400">
-                {intervalCount}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Full Screen Insight Overlay */}
-      {isFullScreen && latestInsight && (
-        <div className="mt-6 z-10 max-w-2xl text-center px-4 animate-pulse duration-[3000ms]">
-          <div className="text-[10px] text-cyan-500/70 uppercase tracking-widest mb-2 font-bold">Analyst Uplink</div>
-          <p className={`text-lg md:text-xl font-medium italic leading-relaxed ${zone ? zone.textClass : 'text-slate-300'} transition-colors duration-500`}>
-            "{latestInsight}"
-          </p>
-        </div>
-      )}
-
-      <div className="mt-8 flex gap-2 w-full max-w-[200px] z-10">
-        {[...Array(12)].map((_, i) => (
-          <div 
-            key={i} 
-            className="h-1 flex-1 transition-all duration-300" 
-            style={{ 
-              backgroundColor: hr && hr > 0 && i < (hr/15) ? (zone ? zone.color : '#334155') : '#0f172a' 
-            }}
-          />
-        ))}
+      <div className="mt-4 flex items-center gap-2 px-3 py-1 bg-slate-800/50 rounded-full border border-slate-700/50">
+        <div className={`w-1.5 h-1.5 rounded-full ${
+          hrTrend.includes('Increase') ? 'bg-emerald-400 animate-pulse' : 
+          hrTrend.includes('Decrease') ? 'bg-rose-400 animate-pulse' : 'bg-slate-500'
+        }`} />
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Trend: {hrTrend}</span>
       </div>
     </div>
   );
 };
-
-export default HeartRateDisplay;

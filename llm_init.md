@@ -6,6 +6,7 @@ This document describes the structure and elements of the initialization LLM pro
 The initialization prompt sets the stage for the session by defining the AI's identity and the user's objectives.
 
 - **Persona Identity**: The core character traits and background of the selected AI coach.
+- **Baseline TTS Instruction**: The persona's default delivery style.
 - **User Goal**: The title of the selected training objective (e.g., "Fat Burn", "Endurance").
 - **Activity Context (Conditional)**:
     - *If Disabled*: Explicit mention of the activity the user is performing (e.g., "Cycling", "Running").

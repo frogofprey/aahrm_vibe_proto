@@ -6,6 +6,8 @@ This document describes the structure and elements of the final session report L
 The final report is generated in the persona's voice to provide closure.
 
 - **Persona Identity**: The core character traits and background of the selected AI coach.
+- **Brevity Driver**: Instructions to keep the report concise and tactical.
+- **Baseline TTS Instruction**: The persona's default delivery style.
 - **User Goal**: The title of the selected training objective.
 - **Activity Context (Conditional)**:
     - *If Disabled*: Explicit mention of the activity the user is performing (e.g., "Cycling", "Running").

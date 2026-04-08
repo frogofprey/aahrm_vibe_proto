@@ -75,8 +75,8 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
     *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
-*   **Output**: A concise insight string prefixed with a "Saliency Score" (e.g., `Score: [7] | Push harder!`).
-*   **Side Effect**: Triggers **TTS Synthesis** *only if* the Saliency Score >= User's configured Voice Threshold.
+*   **Output**: A structured JSON response containing a saliency score, coaching directive, persona narrative, and TTS instructions.
+*   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
 
 ### E. Mid-Term Memory Update
 *   **Trigger**: Immediately **after** the *Minute Analysis* completes (starting from the first minute packet).

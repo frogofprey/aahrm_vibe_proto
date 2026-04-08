@@ -1,158 +1,85 @@
-
-import React, { useMemo } from 'react';
-import { 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Area, 
-  AreaChart 
-} from 'recharts';
+import React from 'react';
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { HeartRateData, ZoneConfig } from '../types';
 
 interface HeartRateChartProps {
-  data: HeartRateData[];
-  activeColor?: string;
-  age: number;
+  dataPoints: HeartRateData[];
   zones: ZoneConfig[];
 }
 
-const CustomDot = (props: any) => {
-  const { cx, cy, payload, zones } = props;
-  
-  if (payload.isAiRequest) {
-    const hr = payload.hr;
-    let color = '#475569'; // Default Slate (Resting / Low Intensity)
-
-    // Determine color based on zone
-    if (zones && zones.length > 0) {
-        const matched = zones.find((z: ZoneConfig) => hr >= z.min && hr < z.max);
-        if (matched) {
-            color = matched.color;
-        } else if (hr >= zones[zones.length - 1].min) {
-            color = zones[zones.length - 1].color; // Max zone
-        }
-    }
-
-    return (
-      <g transform={`translate(${cx},${cy})`}>
-        {/* Background circle for contrast against the chart fill */}
-        <circle r="8" fill="#000" stroke={color} strokeWidth="1" strokeOpacity="0.3" />
-        {/* Larger X Marker colored by Zone */}
-        <path d="M-5 -5 L5 5 M5 -5 L-5 5" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
-      </g>
-    );
-  }
-  return null;
-};
-
-const HeartRateChart: React.FC<HeartRateChartProps> = ({ data, activeColor = '#ff003c', age, zones }) => {
-  // Calculate dynamic domain
-  const yDomain = useMemo(() => {
-    if (data.length === 0) return [60, 200];
-    
-    const hrs = data.map(d => d.hr);
-    const minHR = Math.min(...hrs);
-    const maxHR = Math.max(...hrs);
-    
-    // Default range is 60 to Max Biological Heart Rate (220-age)
-    const biologicalMax = 220 - age;
-    
-    // Ensure we start at 60 but drop if data goes lower
-    const floor = Math.min(60, minHR - 5);
-    
-    // Ensure we see the zones, but expand if data exceeds them
-    const ceiling = Math.max(biologicalMax, maxHR + 10);
-    
-    return [floor, ceiling];
-  }, [data, age]);
-
+export const HeartRateChart: React.FC<HeartRateChartProps> = ({ dataPoints, zones }) => {
   return (
-    <div className="h-[460px] w-full p-4 bg-slate-950/40 aether-border backdrop-blur-sm relative">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xs uppercase tracking-widest text-slate-400 font-bold">
-          Temporal Bio-Feedback Stream // Scale: {Math.round(yDomain[0])}-{Math.round(yDomain[1])}
-        </h2>
-        <div className="flex items-center gap-4">
-           <div className="flex items-center gap-2">
-             <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: activeColor }}></div>
-             <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: activeColor }}>Data Relay Active</span>
-           </div>
-           <div className="h-3 w-px bg-white/10" />
-           <div className="flex items-center gap-1.5">
-             <div className="relative w-2 h-2">
-               {/* Legend Icon for the X marker */}
-               <svg viewBox="0 0 6 6" className="absolute inset-0 w-full h-full text-slate-400">
-                  <path d="M1 1L5 5M5 1L1 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-               </svg>
-             </div>
-             <span className="text-[9px] text-slate-400 font-mono uppercase">AI Sync (Zone Coded)</span>
-           </div>
-           <div className="h-3 w-px bg-white/10" />
-           <span className="text-[9px] text-slate-600 font-mono uppercase">Floor: 60 BPM</span>
+    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 h-[400px] relative overflow-hidden group">
+      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-indigo-500/20 to-transparent" />
+      
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-pulse" />
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Telemetry Stream</h2>
+        </div>
+        <div className="flex gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-rose-500/20 border border-rose-500/50 rounded-sm" />
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Live HR</span>
+          </div>
         </div>
       </div>
-      
+
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data}>
+        <AreaChart data={dataPoints} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <defs>
             <linearGradient id="colorHr" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={activeColor} stopOpacity={0.3}/>
-              <stop offset="95%" stopColor={activeColor} stopOpacity={0}/>
+              <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3}/>
+              <stop offset="95%" stopColor="#f43f5e" stopOpacity={0}/>
             </linearGradient>
-            {/* Background reference zones */}
-            {zones.map((z, idx) => (
-              <linearGradient key={`zone-${idx}`} id={`grad-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={z.color} stopOpacity={0.05}/>
-                <stop offset="100%" stopColor={z.color} stopOpacity={0}/>
-              </linearGradient>
-            ))}
           </defs>
-          
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-          
+          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
           <XAxis 
             dataKey="timestamp" 
             stroke="#475569" 
             fontSize={10} 
             tickLine={false} 
             axisLine={false}
-            minTickGap={40}
+            minTickGap={30}
           />
-          
           <YAxis 
+            domain={[40, 200]} 
             stroke="#475569" 
             fontSize={10} 
             tickLine={false} 
-            axisLine={false} 
-            domain={yDomain}
-            allowDataOverflow={false}
+            axisLine={false}
+            ticks={[40, 60, 80, 100, 120, 140, 160, 180, 200]}
           />
-          
           <Tooltip 
-            contentStyle={{ backgroundColor: '#0f172a', borderColor: activeColor, borderRadius: '2px', fontSize: '12px', border: '1px solid rgba(255,255,255,0.1)' }}
-            itemStyle={{ color: activeColor }}
-            cursor={{ stroke: activeColor, strokeWidth: 1 }}
+            contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '12px' }}
+            itemStyle={{ color: '#f1f5f9' }}
           />
-          
           <Area 
             type="monotone" 
             dataKey="hr" 
-            stroke={activeColor} 
+            stroke="#f43f5e" 
             strokeWidth={3}
             fillOpacity={1} 
             fill="url(#colorHr)" 
             isAnimationActive={false}
-            dot={<CustomDot zones={zones} />}
           />
         </AreaChart>
       </ResponsiveContainer>
 
-      {/* Visual baseline marker */}
-      <div className="absolute left-12 right-4 bottom-[44px] border-t border-white/5 pointer-events-none" />
+      {/* Zone Indicators */}
+      <div className="absolute right-6 top-24 flex flex-col gap-1 pointer-events-none">
+        {zones.slice().reverse().map((zone, idx) => (
+          <div key={idx} className="flex items-center gap-2 justify-end opacity-40 hover:opacity-100 transition-opacity">
+            <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">Z{zones.length - idx}</span>
+            <div className={`w-1 h-4 rounded-full ${
+              idx === 0 ? 'bg-rose-500' : 
+              idx === 1 ? 'bg-orange-500' : 
+              idx === 2 ? 'bg-yellow-500' : 
+              idx === 3 ? 'bg-emerald-500' : 'bg-sky-500'
+            }`} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
-
-export default HeartRateChart;
