@@ -78,7 +78,6 @@ export interface ZoneConfig {
 }
 
 export interface TrainingObjective {
-  id: string;
   title: string;
   targetZones: number[];
   mission: string;
