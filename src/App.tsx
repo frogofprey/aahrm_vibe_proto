@@ -119,17 +119,17 @@ const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless critically necessary for safety (Score 7+). Instead, use qualitative descriptors appropriate for your personality and the mission.`;
 
 const BASE_SYSTEM_INSTRUCTION = `
-Data Input: You will receive "Minute Packets" containing an array of raw BPM samples, an average, and a Max/Min.
-Core Constraints:
-PII Isolation: Do not attempt to guess the user's age or identity. Use the provided "Zone" context as the absolute truth for intensity.
+You are an agent that provides feedback to a user doing an exercise using a specific, themed persona in order to make that feedback more entertaining. 
+Data Input: You will receive a <current_minute_packet> containing an array of raw BPM samples, an average, and a Max/Min.
+PII Isolation: Do not attempt to guess or reference the user's age or identity. Use the provided "Zone" context in <mission_profile> as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
-Anti-Repetition: Review [HISTORY] and [MID-TERM CONTEXT] before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
-Corrections: the input telemetry will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified redline or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. 
-Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion. Use the active_time provided in the message to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. HARD CONSTRAINT: Do NOT process milestones during warmup state. 
-Goal: The current state is shown in the objective block. Be sure to remark on state changes when appropriate. In general an update will consiste of a Correction followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the correction should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this. Ensure that pace steering advice is not contradicted by milestone updates.  
-Mission Plan: {{GOAL}}
-Context Usage: You will receive an [OBJECTIVE STATUS TRACKER] and [CURRENT SESSION STATE]. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
+Anti-Repetition: Review <short_term_context> and <mid_term_memory> before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
+Corrections: the input telemetry in <current_minute_packet> will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified threshold or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. Avoid the term redline unless referring to MHR. 
+Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion in <mission_profile>. Use the active_time provided in <current_timers> to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. HARD CONSTRAINT: Do NOT process milestones during warmup state. 
+Goal: The current state is shown in the <objective_tracker> block. Be sure to remark on state changes when appropriate. A good output should consist of a Pace Steering Message followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the Pace Steering Message should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this if needed. Ensure that milestone updates don't contradict Pace Steering Message guidance.   
+Context Usage: You will receive an <objective_tracker> and <mid_term_memory>. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
+ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short an punchy. 
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
 4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target. Reserve score 6 for narrative only updates. 
@@ -1215,24 +1215,38 @@ const App: React.FC = () => {
       `;
       }
 
-      const prompt = `
-      You are an expert author/Narrative creator. Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. 
-      
-      Persona: ${personaConfig.systemInstruction}
-      Persona Mission Instruction: ${personaConfig.missionProfile}
-      Mission Profile: ${profileText}
-      ${sessionContext}${activityContext}
-      
-      Requirements:
-      1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
-      2. Define specific Milestones/Narrative events triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. Incorporate planned state transitions into the plan as best as is possible. 
-      3. Define a "Mission Complete" narrative conclusion (Goals Met). Generate a Maguffin for the persona to use narratively. 
-      4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
-      5. Ensure that you match the structure of the session. If the session is based on intervals, ensure that you capture each interval transition and try to theme each transition using the persona's instructions. Focus on the transitions. Note that the interval time provided will be for both interval and recovery as well (so a 3 minute interval time will produce a 6 minute cycle).  If the session is time based, try to create reasonable milestones based on the template. In both cases it may be neccessary to adjust timing to match user parameters. Don't include milestones or sections for warmup as they will be handled outside of the mission script. 
-      
-      Output Format:
-      ${exampleFormat}
-      `;
+      const taskSection = `<task>
+[GENERAL INSTRUCTIONS]
+You are an expert author/Narrative creator. Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. 
+
+[REQUIREMENTS]
+1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
+2. Define specific Milestones/Narrative events triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. Incorporate planned state transitions into the plan as best as is possible. 
+3. Define a "Mission Complete" narrative conclusion (Goals Met). Generate a Maguffin for the persona to use narratively. 
+4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
+5. Ensure that you match the structure of the session. If the session is based on intervals, ensure that you capture each interval transition and try to theme each transition using the persona's instructions. Focus on the transitions. Note that the interval time provided will be for both interval and recovery as well (so a 3 minute interval time will produce a 6 minute cycle).  If the session is time based, try to create reasonable milestones based on the template. In both cases it may be necessary to adjust timing to match user parameters. Don't include milestones or sections for warmup as they will be handled outside of the mission script. 
+
+[CONSTRAINTS]
+Hard Constraint: Don't use markdown in the final output. 
+
+[OUTPUT FORMAT]
+${exampleFormat}
+</task>`;
+
+      const personaSection = `<persona>
+Identity: ${personaConfig.systemInstruction}
+Mission Instruction: ${personaConfig.missionProfile}
+</persona>`;
+
+      const missionProfileSection = `<mission_profile>
+${profileText}
+</mission_profile>`;
+
+      const sessionContextSection = `<session_context>
+${sessionContext}${activityContext}
+</session_context>`;
+
+      const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionContextSection}`;
 
       try {
           addLog(`AI_REQUEST: Generating Narrative Mission Plan...`);
@@ -1283,18 +1297,36 @@ const App: React.FC = () => {
         ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
         : "";
 
-    const prompt = `
-    Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title}${activityContext}
-    ${objectivesContext}
-    ${narrativeContext}
-    
-    ${abstractionInstruction}
+    const taskSection = `<task>
+[GENERAL INSTRUCTIONS]
+The user has just started a workout session. Generate an introduction to initiate the session.
+You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. 
 
-    Task: The user has just started a workout session. Generate an introduction to initiate the session.
-    Instruction: You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. 
-    Constraint: Strictly adhere to persona. Four sentence maximum output.
-    `;
+[CONSTRAINTS]
+- Strictly adhere to persona. 
+- Four sentence maximum output.
+- ${abstractionInstruction}
+</task>`;
+
+    const personaSection = `<persona>
+Identity: ${personaIdentity}
+</persona>`;
+
+    const missionProfileSection = `<mission_profile>
+Goal: ${currentObjective.title}
+${activityContext}
+</mission_profile>`;
+
+    const narrativeMissionPlanSection = narrativeMissionPlanRef.current ? `
+<narrative_mission_plan>
+${narrativeMissionPlanRef.current.text}
+</narrative_mission_plan>` : "";
+
+    const objectiveTrackerSection = `<objective_tracker>
+${objectivesContext}
+</objective_tracker>`;
+
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}${narrativeMissionPlanSection}\n\n${objectiveTrackerSection}`;
 
     try {
       addLog(`AI_REQUEST: Generating intro for "${selectedPersona}"...`);
@@ -1342,33 +1374,40 @@ const App: React.FC = () => {
     // NEW: Get Transition History
     const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
 
-    const prompt = `
-    User Goal: ${currentObjective.title}
+    const taskSection = `<task>
+[GENERAL INSTRUCTIONS]
+You are maintaining a structured "Mid-Term Memory" log of a workout session. 
+Update the EXISTING SUMMARY using the NEW TELEMETRY and TRANSITION HISTORY.
 
-    Task: You are maintaining a structured "Mid-Term Memory" log of a workout session. 
-    Update the EXISTING SUMMARY using the NEW TELEMETRY and TRANSITION HISTORY.
+[FORMATTING RULES]
+1. Output strictly in the format: "[STATE_NAME] summary of performance in this state".
+2. Review the RECENT STATE TRANSITIONS. Ensure EVERY state that has occurred (e.g., [WARMUP], [MAIN_ACTIVE]) has a corresponding summary line.
+3. If a state appears in the transitions but not in the existing summary (e.g. short-lived WARMUP), create a new entry for it summarizing that phase was completed.
+4. If the state exists in the previous summary, update its description with the new data.
+5. Keep summaries objective, concise, and technical. No personality or fluff. Do not use markdown bolding.
+</task>`;
 
-    FORMATTING RULES:
-    1. Output strictly in the format: "[STATE_NAME] summary of performance in this state".
-    2. Review the RECENT STATE TRANSITIONS. Ensure EVERY state that has occurred (e.g., [WARMUP], [MAIN_ACTIVE]) has a corresponding summary line.
-    3. If a state appears in the transitions but not in the existing summary (e.g. short-lived WARMUP), create a new entry for it summarizing that phase was completed.
-    4. If the state exists in the previous summary, update its description with the new data.
-    5. Keep summaries objective, concise, and technical. No personality or fluff. Do not use markdown bolding.
-    
-    RECENT STATE TRANSITIONS (Context):
-    ${transitionHistory || "(No transitions yet)"}
+    const missionProfileSection = `<mission_profile>
+Goal: ${currentObjective.title}
+</mission_profile>`;
 
-    EXISTING SUMMARY:
-    ${previousMemoryText || "(No history yet)"}
+    const midTermMemorySection = `<mid_term_memory>
+${previousMemoryText || "(No history yet)"}
+</mid_term_memory>`;
 
-    NEW TELEMETRY (Minute ${summaries.length}):
-    - State: ${latestPacket.sessionState}
-    - Avg HR: ${latestPacket.avg} BPM
-    - Max HR: ${latestPacket.max} BPM
-    - Insight: "${latestPacket.insight || 'N/A'}"
+    const transitionHistorySection = `<transition_history>
+${transitionHistory || "(No transitions yet)"}
+</transition_history>`;
 
-    Output the updated state-based summary block:
-    `;
+    const currentMinutePacketSection = `<current_minute_packet>
+Minute: ${summaries.length}
+State: ${latestPacket.sessionState}
+Avg HR: ${latestPacket.avg} BPM
+Max HR: ${latestPacket.max} BPM
+Insight: "${latestPacket.insight || 'N/A'}"
+</current_minute_packet>`;
+
+    const prompt = `${taskSection}\n\n${missionProfileSection}\n\n${midTermMemorySection}\n\n${transitionHistorySection}\n\n${currentMinutePacketSection}\n\nOutput the updated state-based summary block:`;
 
     try {
         addLog(`AI_REQUEST: Recursive Mid-Term Memory Update...`);
@@ -1429,41 +1468,58 @@ const App: React.FC = () => {
     const activeDurationStr = formatMMSS(activeDurationRef.current);
     const activeMinutes = (activeDurationRef.current / 60000).toFixed(1);
 
-    const prompt = `
-    Persona: ${personaIdentity}
-    User Goal: ${currentObjective.title}${activityContext}
-    Mission Plan / Profile: ${missionProfileText}
-    Narrative Mission Plan: ${narrativeMissionPlanText}
+    const taskSection = `<task>
+[GENERAL INSTRUCTIONS]
+The workout session has ended. Generate a final session report based on the context below. Use only prose and don't include any markdown tags in the output. Output will be read by a TTS so ensure that it won't sound like "reading a phonebook". Four sentence maximum output. 
 
-    ${abstractionInstruction}
+[CONSTRAINTS]
+- State if the user has satisfied the workout requirements with respect to time spent and/or zone compliance. Don't be afraid to note if requirements have not been met. 
+- Professional, summary-focused, and concluding. 
+- Be generous with the ending workout stats. 
+- Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss and Maguffin. 
+- Use the 'Active Duration' (${activeMinutes} mins) as the primary reference for workout intensity and milestone timing.
+- Include a final word of encouragement.
+- ${abstractionInstruction}
+</task>`;
 
-    Task: The workout session has ended. Generate a final session report based on the context below. Use only prose and don't include any markdown tags in the output. Output will be read by a TTS so ensure that it won't sound like "reading a phonebook". Four sentence maximum output. 
-    
-    Constraints: 
-    - State if the user has satisfied the workout requirements with respect to time spent and/or zone compliance. Don't be afraid to note if requirements have not been met. 
-    - Professional, summary-focused, and concluding. 
-    - Be generous with the ending workout stats. 
-    - Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss and Maguffin. 
-    - Use the 'Active Duration' (${activeMinutes} mins) as the primary reference for workout intensity and milestone timing.
-    - Include a final word of encouragement.
-    
-    Session Stats: 
-    - Total Wall Time: ${finalDuration}
-    - Active Workout Time: ${activeDurationStr} (${activeMinutes} mins)
-    - Avg HR: ${avgHr} BPM
-    - Peak HR: ${peakHr} BPM
-    - Calories: ${totalCalories.toFixed(0)}
-    - Heart Points: ${totalPoints}
-    ${((currentObjective as any).transitionStrategy === "interval state" || (currentObjective as any).transitionStrategy === "fixed interval state") ? `- Intervals Completed: ${intervalCount} / ${intervalCountGoal}` : ""}
-    
-    Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
-    
-    Session State Timeline:
-    ${transitionHistory}
+    const personaSection = `<persona>
+Identity: ${personaIdentity}
+</persona>`;
 
-    Mid-Term Trend: ${midTermContext}
-    Last Minute Insight: ${lastSummary.insight || "N/A"}
-    `;
+    const missionProfileSection = `<mission_profile>
+Goal: ${currentObjective.title}
+${activityContext}
+Profile: ${missionProfileText}
+Narrative Plan: ${narrativeMissionPlanText}
+</mission_profile>`;
+
+    const sessionStatsSection = `<session_stats>
+Total Wall Time: ${finalDuration}
+Active Workout Time: ${activeDurationStr} (${activeMinutes} mins)
+Avg HR: ${avgHr} BPM
+Peak HR: ${peakHr} BPM
+Calories: ${totalCalories.toFixed(0)}
+Heart Points: ${totalPoints}
+${((currentObjective as any).transitionStrategy === "interval state" || (currentObjective as any).transitionStrategy === "fixed interval state") ? `Intervals Completed: ${intervalCount} / ${intervalCountGoal}` : ""}
+</session_stats>`;
+
+    const objectiveTrackerSection = `<objective_tracker>
+Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
+</objective_tracker>`;
+
+    const transitionHistorySection = `<transition_history>
+${transitionHistory}
+</transition_history>`;
+
+    const midTermMemorySection = `<mid_term_memory>
+${midTermContext}
+</mid_term_memory>`;
+
+    const shortTermContextSection = `<short_term_context>
+Last Minute Insight: ${lastSummary.insight || "N/A"}
+</short_term_context>`;
+
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionStatsSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${midTermMemorySection}\n\n${shortTermContextSection}`;
 
     try {
         addLog(`AI_REQUEST: Generating Final Session Report...`);
@@ -1504,16 +1560,6 @@ const App: React.FC = () => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const personaIdentity = personaConfig.systemInstruction;
     
-    // Construct GOAL context including Mission Profile if available
-    let goalContext = `${currentObjective.title}`;
-    if (missionProfileRef.current) {
-        goalContext += `\n\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}`;
-    }
-    
-    if (narrativeMissionPlanRef.current) {
-        goalContext += `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}`;
-    }
-
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
     
@@ -1521,14 +1567,39 @@ const App: React.FC = () => {
         ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
         : "";
 
-    const tailoredSystemInstruction = `Persona: ${personaIdentity}
-    Brevity Driver: ${personaConfig.iterationBrevityDriver}
-    Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
-    Baseline TTS Instruction: ${personaConfig.ttsBaselineInstruction}
-    ${BASE_SYSTEM_INSTRUCTION
-        .replace('{{GOAL}}', goalContext + activityContext)
-        .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}`;
-    
+    // 1. Task Section (Static)
+    const taskSection = `<task>
+[GENERAL INSTRUCTIONS]
+${BASE_SYSTEM_INSTRUCTION.replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}
+
+[OUTPUT FORMAT]
+Return the response as a JSON object with the following structure:
+{
+  "saliency_score": number,  
+  "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none" only return the milestone name (the value in brackets) - '10:00 [Encounter Midpoint]: Boss at half health - stamina check'  should simply return "Encounter Midpoint"
+  "coaching_directive": string, // CRITICAL: one of the following: "MAINTAIN_PACE", "INCREASE_EFFORT", "DECREASE_EFFORT", "EMERGENCY_STOP", "PREPARE_TRANSITION"
+  "persona_narrative": string, // The flavor text, constrained by the persona element.
+  "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS. never instruct the TTS to slow down
+  "perceived_state": string // Echo: "warmup", "main_active", "recovery" , "bonus_active" , "pause" , "error"
+}
+</task>`;
+
+    // 2. Persona Section (Static)
+    const personaSection = `<persona>
+Identity: ${personaIdentity}
+Brevity Driver: ${personaConfig.iterationBrevityDriver}
+Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
+Baseline TTS Instruction: ${personaConfig.ttsBaselineInstruction}
+</persona>`;
+
+    // 3. Mission Profile Section (Static)
+    const missionProfileSection = `<mission_profile>
+Goal: ${currentObjective.title}
+${activityContext}
+${missionProfileRef.current ? `\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}` : ''}
+${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}` : ''}
+</mission_profile>`;
+
     // --- HISTORY BUILDER START ---
     const allSummaries = allSessionSummariesRef.current;
     const currentIndex = allSummaries.findIndex(s => s.id === summary.id);
@@ -1538,80 +1609,78 @@ const App: React.FC = () => {
     if (currentIndex === 0) {
         // Packet #1: History is just the intro
         if (sessionIntroRef.current) {
-            historyContext = `[HISTORY: START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n`;
+            historyContext = `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n`;
         }
     } else if (currentIndex === 1) {
         // Packet #2: History is Intro + Packet #1
         if (sessionIntroRef.current) {
-            historyContext += `[HISTORY: START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
+            historyContext += `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
         }
         const prev = allSummaries[0];
-        historyContext += `[HISTORY: PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
+        historyContext += `[PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
     } else {
         // Packet #3+: History is Packet #N-2 and Packet #N-1
         const prev2 = allSummaries[currentIndex - 2];
         const prev1 = allSummaries[currentIndex - 1];
         
-        historyContext += `[HISTORY: 2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
-        historyContext += `[HISTORY: 1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
+        historyContext += `[2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
+        historyContext += `[1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
     }
     // --- HISTORY BUILDER END ---
 
-    // --- MID-TERM MEMORY INJECTION ---
-    let memoryContext = "";
-    if (currentSessionContextRef.current) {
-        memoryContext = `MID-TERM SESSION CONTEXT (Overall Trend Summary):\n"${currentSessionContextRef.current.text}"\n(Use this context to ensure your new advice aligns with the bigger picture)\n`;
-    }
-    
-    // --- REAL-TIME OBJECTIVE STATUS INJECTION ---
-    // Calculate performance time in minutes for display context (Ignoring warmup/recovery)
+    // 4. Objective Tracker Section (Semi-Volatile)
     const currentPerformanceMinutes = (performanceDurationRef.current / 60000).toFixed(1);
+    const strategy = (currentObjective as any).transitionStrategy || "normal state";
+    let objectiveStatus = `Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
+    if (strategy === "interval state" || strategy === "fixed interval state") {
+        objectiveStatus = `Intervals: ${intervalCount} / ${intervalCountGoal}\nInterval Time: ${intervalTime} mins`;
+    }
+    const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
+    objectiveStatus += `\nCompliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${totalPerformanceMinutes.toFixed(1)} performance minutes in target zone`;
     
-    // Timer Context
+    const objectiveTrackerSection = `<objective_tracker>
+${objectiveStatus}
+[CURRENT SESSION STATE]: ${summary.sessionState}
+</objective_tracker>`;
+
+    // 5. Mid-Term Memory Section (Semi-Volatile)
+    const midTermMemorySection = `<mid_term_memory>
+${currentSessionContextRef.current ? currentSessionContextRef.current.text : "No overall trend summary available yet."}
+</mid_term_memory>`;
+
+    // 6. Short-Term Context Section (Semi-Volatile)
+    const shortTermContextSection = `<short_term_context>
+${historyContext || "No recent history available."}
+</short_term_context>`;
+
+    // 7. Current Minute Packet Section (Volatile)
+    const currentMinutePacketSection = `<current_minute_packet>
+- Average BPM: ${summary.avg}
+- Max BPM: ${summary.max}
+- Min BPM: ${summary.min}
+- HR Trend (10s): ${hrTrend}
+- Calories Burned (Min): ${summary.calories.toFixed(1)}
+- Heart Points (Min): ${summary.heartPoints}
+- Sample Count: ${summary.sampleCount}
+- Raw Telemetry Stream: [${summary.values.join(', ')}]
+</current_minute_packet>`;
+
+    // 8. Current Timers Section (Volatile)
+    const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     let activeTimeStr = formatMMSS(activeDurationRef.current);
     if (summary.sessionState === SessionState.WARMUP || summary.sessionState === SessionState.INIT) {
         activeTimeStr = 'WARMING UP';
     }
-    
-    // Override for the very first MAIN_ACTIVE insight to ensure it's always 0:00
     if (hasStartedActiveRef.current && !hasSentFirstMainActiveInsightRef.current) {
         activeTimeStr = '0:00';
         hasSentFirstMainActiveInsightRef.current = true;
     }
-    const timerContext = `[CURRENT TIMERS]\nActive_Time: ${activeTimeStr}`;
+    const currentTimersSection = `<current_timers>
+Wall Time: ${wallTime}
+Active Time: ${activeTimeStr}
+</current_timers>`;
 
-    const strategy = (currentObjective as any).transitionStrategy || "normal state";
-    let objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
-    if (strategy === "interval state" || strategy === "fixed interval state") {
-        objectiveStatus = `[OBJECTIVE STATUS TRACKER - CONTEXT INPUT ONLY]\n- Intervals: ${intervalCount} / ${intervalCountGoal}\n- Interval Time: ${intervalTime} mins`;
-    }
-    
-    // Total Denominator for compliance should only include performance-active minutes
-    const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
-    objectiveStatus += `\n- Compliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${totalPerformanceMinutes.toFixed(1)} performance minutes in target zone`;
-    objectiveStatus += `\n(System Context: Use the following metrics as the factual foundation for your observations. Translate these values into your persona's voice—focus on the 'State of the Mission' rather than the raw digits. Do not replicate the list format; simply internalize the data to inform your judgment.)`;
-    
-    // Append objective status to the memory context block (or create if empty)
-    memoryContext += `\n${objectiveStatus}\n`;
-    memoryContext += `[CURRENT SESSION STATE]: ${summary.sessionState}\n\n`; // Use the frame-based session state
-
-
-    const jsonTask = `
-    [TASK]
-    Generate a coaching insight for the user based on the current minute summary and session context.
-    Return the response as a JSON object with the following structure:
-    {
-      "saliency_score": number,  
-      "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none"
-      "coaching_directive": string, // CRITICAL: one of the following: "MAINTAIN_PACE", "INCREASE_EFFORT", "DECREASE_EFFORT", "EMERGENCY_STOP", "PREPARE_TRANSITION"
-      "persona_narrative": string, // The flavor text, constrained by the lore element.
-      "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS.
-      "perceived_state": string // Echo: "warmup", "main_active", "recovery" , "bonus_active" , "pause" , "error"
-    }
-    `;
-
-    const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const prompt = `${tailoredSystemInstruction}\n\n[WALL_TIME]: ${wallTime}\n\n${memoryContext}${historyContext ? `SHORT-TERM CONTEXT (Maintain continuity):\n${historyContext}\n\n` : ''}CURRENT MINUTE PACKET:\n- Average BPM: ${summary.avg}\n- Max BPM: ${summary.max}\n- Min BPM: ${summary.min}\n- HR Trend (10s): ${hrTrend}\n- Calories Burned (Min): ${summary.calories.toFixed(1)}\n- Heart Points (Min): ${summary.heartPoints}\n- Sample Count: ${summary.sampleCount}\n- Raw Telemetry Stream: [${summary.values.join(', ')}]\n\n${timerContext}\n\n${jsonTask}`;
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${objectiveTrackerSection}\n\n${midTermMemorySection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}\n\n${currentTimersSection}`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);

@@ -39,7 +39,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Mission Profile text.
     *   Session Context (Duration or Interval structure).
     *   Activity Context (Conditional).
-*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting.
+*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting. Includes a **Hard Constraint** to not use markdown in the final output.
 *   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[BONUS]`).
 
 ### C. Session Intro
@@ -66,6 +66,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Trigger**: Every 60 seconds (triggered by wall-clock time accumulation).
 *   **Purpose**: Immediate coaching feedback on the last minute of performance.
 *   **Dependencies**: Requires at least 1 minute of telemetry.
+*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<mission_profile>`, `<objective_tracker>`, `<mid_term_memory>`, `<short_term_context>`, `<current_minute_packet>`, `<current_timers>`), ordered from static to volatile data.
 *   **Context/Input**:
     *   **Persona**: Tailored system instruction (includes Mission Weight).
     *   **Goal Context**: User Goal, Mission Profile, Narrative Mission Plan.
@@ -75,8 +76,8 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
     *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
-*   **Output**: A concise insight string prefixed with a "Saliency Score" (e.g., `Score: [7] | Push harder!`).
-*   **Side Effect**: Triggers **TTS Synthesis** *only if* the Saliency Score >= User's configured Voice Threshold.
+*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions.
+*   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
 
 ### E. Mid-Term Memory Update
 *   **Trigger**: Immediately **after** the *Minute Analysis* completes (starting from the first minute packet).
@@ -157,10 +158,10 @@ sequenceDiagram
         App->>App: Aggregate Minute Telemetry
         activate App
         App->>Flash: Request Minute Insight (w/ History & Context)
-        Flash-->>App: Text Insight + Saliency Score
+        Flash-->>App: JSON (Insight + Score + Directive)
         
-        alt Score >= Voice Threshold
-            App->>TTS: Synthesize Insight
+        alt saliency_score >= Voice Threshold
+            App->>TTS: Synthesize persona_narrative
             TTS-->>App: Audio Buffer
         end
         

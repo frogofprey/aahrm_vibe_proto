@@ -1,35 +1,53 @@
 # LLM Initialization Prompt Abstraction
 
-This document describes the structure and elements of the initialization LLM prompt used to start a workout session.
+This document describes the structure and elements of the initialization LLM prompts used to start a workout session.
 
-## 1. Persona and Goal Definition
-The initialization prompt sets the stage for the session by defining the AI's identity and the user's objectives.
+## 1. Narrative Mission Plan Prompt
+Used to establish the story arc for the session. Structured using XML-like tags, ordered from static to volatile.
 
-- **Persona Identity**: The core character traits and background of the selected AI coach.
-- **User Goal**: The title of the selected training objective (e.g., "Fat Burn", "Endurance").
-- **Activity Context (Conditional)**:
-    - *If Disabled*: Explicit mention of the activity the user is performing (e.g., "Cycling", "Running").
-- **Objectives Context**:
-    - **Time-Based**: "Mission Parameter: Target Duration: [mins]"
-    - **Interval-Based**: "Mission Parameter: Target Intervals: [cycles] of [mins] each."
+### `<task>`
+- **General Instructions**: Role definition (expert author/narrative creator).
+- **Requirements**: 
+    - Recontextualization of workout goals.
+    - Milestone definition (every 5 mins).
+    - Mission Complete/Maguffin definition.
+    - Bonus/Overtime context.
+    - Structural matching (Intervals vs. Time).
+- **Constraints**: Hard constraint against markdown.
+- **Output Format**: Template for the mission plan.
 
-## 2. Narrative Mission Plan (Conditional)
-If a Narrative Mission Plan was generated, it is provided to the LLM to ensure the introduction incorporates the theme immediately.
+### `<persona>`
+- **Identity**: Core character traits.
+- **Mission Instruction**: Specific narrative guidance.
 
-- **Theme**: The recontextualized workout goal (e.g., "Operation Laser-Pointer").
-- **Timeline**: A list of milestones and narrative events triggering throughout the session.
-- **Mission Complete**: The narrative conclusion and Maguffin (e.g., "Golden Yarn Trophy").
-- **Bonus/Overtime**: The narrative context for continuing past the goal.
+### `<mission_profile>`
+- **Ground Truth**: HR targets and phase protocols.
 
-## 3. Telemetry Abstraction (Conditional)
-- **Instruction**: If enabled, the LLM is instructed to use qualitative descriptors instead of raw BPM values (e.g., "Your pulse is steady" instead of "145 bpm").
+### `<session_context>`
+- **Parameters**: Target duration or interval structure.
+- **Activity**: The specific activity being performed.
 
-## 4. Task and Instructions
-The specific instructions for generating the introduction.
+---
 
-- **Task**: Generate an introduction to initiate the session.
-- **Instruction**: 
-    - Reference the Mission Parameter naturally.
-    - Speak to the user directly, avoiding reading settings back as a list.
-    - Incorporate the theme from the Narrative Mission Plan immediately.
-- **Constraint**: Strictly adhere to the persona.
+## 2. Session Intro Prompt
+Used to generate the first interaction with the user.
+
+### `<task>`
+- **General Instructions**: Generate an introduction referencing parameters naturally.
+- **Constraints**: 
+    - Persona adherence.
+    - Four sentence maximum.
+    - Telemetry abstraction rules.
+
+### `<persona>`
+- **Identity**: Core character traits.
+
+### `<mission_profile>`
+- **Goal**: The training objective.
+- **Activity**: The specific activity being performed.
+
+### `<narrative_mission_plan>` (Conditional)
+- **Story Arc**: The theme and timeline generated in the previous step.
+
+### `<objective_tracker>`
+- **Parameters**: Target duration or interval structure.
