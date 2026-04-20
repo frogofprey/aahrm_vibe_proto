@@ -39,7 +39,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Mission Profile text.
     *   Session Context (Duration or Interval structure).
     *   Activity Context (Conditional).
-*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting. Includes a **Hard Constraint** to not use markdown in the final output.
+*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting. Includes a **Hard Constraint** to not use markdown in the final output. Includes a 1,024 `maxOutputTokens` constraint in `generationConfig`.
 *   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[BONUS]`).
 
 ### C. Session Intro
@@ -53,7 +53,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Narrative Context (if available).
     *   Telemetry Abstraction Instruction (Conditional).
     *   Activity Context (Conditional).
-*   **Output**: A short motivating opening line. (800 `maxOutputTokens`).
+*   **Output**: A short motivating opening line. (1,024 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---
@@ -66,28 +66,18 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Trigger**: Every 60 seconds (triggered by wall-clock time accumulation).
 *   **Purpose**: Immediate coaching feedback on the last minute of performance.
 *   **Dependencies**: Requires at least 1 minute of telemetry.
-*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<mission_profile>`, `<objective_tracker>`, `<mid_term_memory>`, `<short_term_context>`, `<current_minute_packet>`, `<current_timers>`), ordered from static to volatile data.
+*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<mission_profile>`, `<objective_tracker>`, `<transition_history>`, `<short_term_context>`, `<current_minute_packet>`, `<current_timers>`), ordered from static to volatile data.
 *   **Context/Input**:
     *   **Persona**: Tailored system instruction (includes Mission Weight).
     *   **Goal Context**: User Goal, Mission Profile, Narrative Mission Plan.
     *   **Telemetry Abstraction Instruction** (Conditional).
     *   **Activity Context** (Conditional).
-    *   **Mid-Term Memory**: The running summary of the session trend.
+    *   **Transition History**: Log of all state changes within the session.
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
     *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
-*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (400 `maxOutputTokens`).
+*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (600 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
-
-### E. Mid-Term Memory Update
-*   **Trigger**: Immediately **after** the *Minute Analysis* completes (starting from the first minute packet).
-*   **Purpose**: Summarizes the session history to prevent context window bloat while maintaining a "thread" of the workout's story.
-*   **Dependencies**: Recursive (Depends on the *previous* Mid-Term Memory).
-*   **Context/Input**:
-    *   Existing Mid-Term Memory text.
-    *   Transition Log (State changes like WARMUP -> ACTIVE).
-    *   Most recent Minute Packet stats.
-*   **Output**: An updated, condensed summary text block.
 
 ---
 
@@ -95,7 +85,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 
 These calls occur immediately after the user clicks **"STOP SESSION"**.
 
-### F. Final Session Report
+### E. Final Session Report
 *   **Trigger**: Immediate upon stop.
 *   **Purpose**: Provides a professional/thematic debrief of the entire workout.
 *   **Dependencies**: Full session history.
@@ -109,16 +99,15 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
     *   Avg/Peak HR.
     *   Compliance Score (Performance Minutes in Zone).
     *   State Transition History.
-    *   Mid-Term Trend.
     *   Last Minute Insight.
-*   **Output**: A four-sentence maximum concluding summary. (1,000 `maxOutputTokens`).
+*   **Output**: A four-sentence maximum concluding summary. (1,536 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---
 
 ## 4. Text-to-Speech (TTS) Pipeline
 
-*   **Trigger**: Called by Intro (C), Minute Analysis (D), or Final Report (F).
+*   **Trigger**: Called by Intro (C), Minute Analysis (D), or Final Report (E).
 *   **Model**: `gemini-2.5-flash-preview-tts`.
 *   **Input**: 
     *   Text to speak.
@@ -164,18 +153,13 @@ sequenceDiagram
             App->>TTS: Synthesize persona_narrative
             TTS-->>App: Audio Buffer
         end
-        
-        opt Packet Index > 1
-            App->>Flash: Update Mid-Term Memory (Recursive)
-            Flash-->>App: Updated Trend Summary
-        end
         deactivate App
     end
 
     Note over User, App: 3. CONCLUSION
     User->>App: Click "Stop Session"
     activate App
-    App->>Flash: Generate Final Report (Stats + Trends)
+    App->>Flash: Generate Final Report (Stats + History)
     Flash-->>App: Report Text
     App->>TTS: Synthesize Report
     TTS-->>App: Audio Buffer

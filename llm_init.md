@@ -4,6 +4,7 @@ This document describes the structure and elements of the initialization LLM pro
 
 ## 1. Narrative Mission Plan Prompt
 Used to establish the story arc for the session. Structured using XML-like tags, ordered from static to volatile.
+**Constraint**: 1,024 `maxOutputTokens` in `generationConfig`.
 
 ### `<task>`
 - **General Instructions**: Role definition (expert author/narrative creator).
@@ -31,7 +32,7 @@ Used to establish the story arc for the session. Structured using XML-like tags,
 
 ## 2. Session Intro Prompt
 Used to generate the first interaction with the user.
-**Constraint**: 800 `maxOutputTokens`.
+**Constraint**: 1,024 `maxOutputTokens` in `generationConfig`.
 
 ### `<task>`
 - **General Instructions**: Generate an introduction referencing parameters naturally.

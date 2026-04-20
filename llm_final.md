@@ -4,7 +4,7 @@ This document describes the structure and elements of the final session report L
 
 ## 1. Task Section (`<task>`)
 Defines the core logic and constraints for the report.
-**Constraint**: 1,000 `maxOutputTokens`.
+**Constraint**: 1,536 `maxOutputTokens` in `generationConfig`.
 
 - **General Instructions**: Generate a final session report based on the provided context.
 - **Constraints**: 
@@ -36,8 +36,5 @@ Defines the core logic and constraints for the report.
 ## 6. Transition History Section (`<transition_history>`)
 - **Timeline**: Log of all state changes throughout the session.
 
-## 7. Mid-Term Memory Section (`<mid_term_memory>`)
-- **Trend**: The final recursive summary of the session.
-
-## 8. Short-Term Context Section (`<short_term_context>`)
+## 7. Short-Term Context Section (`<short_term_context>`)
 - **Last Minute Insight**: The final piece of feedback given before the session ended.

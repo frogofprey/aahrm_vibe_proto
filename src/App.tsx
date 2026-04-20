@@ -56,6 +56,22 @@ function formatMMSS(ms: number): string {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function cleanJSONResponse(text: string): string {
+    // Remove markdown code blocks if present
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```json')) {
+        cleaned = cleaned.substring(7);
+    } else if (cleaned.startsWith('```')) {
+        cleaned = cleaned.substring(3);
+    }
+    
+    if (cleaned.endsWith('```')) {
+        cleaned = cleaned.substring(0, cleaned.length - 3);
+    }
+    
+    return cleaned.trim();
+}
+
 // --- Text Cleaning Utility ---
 function cleanInsightText(text: string): string {
   // Removes "Score: [X] | " or "Score: X | " prefix case-insensitively
@@ -250,7 +266,6 @@ const App: React.FC = () => {
   const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const narrativeMissionPlanRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
-  const currentSessionContextRef = useRef<SessionContext | null>(null); // Mid-term memory storage
   const finalSessionReportRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null); // Final report storage
   
   // Audio Context & Queue Refs
@@ -856,14 +871,6 @@ const App: React.FC = () => {
         contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
-        if (s.sessionContextSummary) {
-            contentDebug += `   > SESSION CONTEXT (Mid-Term Memory) : ${s.sessionContextSummary.text}\n`;
-            contentDebug += `     [Context Prompt]: \n${s.sessionContextSummary.prompt}\n`;
-            if (s.sessionContextSummary.tokenUsage) {
-               const u = s.sessionContextSummary.tokenUsage;
-               contentDebug += `     [Context Tokens]: In ${u.input} / Out ${u.output} / Tot ${u.total}\n`;
-            }
-        }
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
         contentDebug += `   > AI JSON    : ${s.rawJson || "N/A"}\n`;
@@ -987,13 +994,13 @@ const App: React.FC = () => {
   }, [processAudioQueue]);
 
   // --- AI Call Retry Helper ---
-  const generateContentWithRetry = useCallback(async (model: string, contents: any, config: any, maxRetries: number, logPrefix: string) => {
+  const generateContentWithRetry = useCallback(async (model: string, contents: any, generationConfig: any, maxRetries: number, logPrefix: string) => {
       let attempt = 0;
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       while (true) {
           try {
-              return await ai.models.generateContent({ model, contents, config });
+              return await ai.models.generateContent({ model, contents, ...generationConfig });
           } catch (e: any) {
               const errStr = String(e);
               // Fast fail on client errors
@@ -1255,7 +1262,7 @@ ${sessionContext}${activityContext}
           const response = await generateContentWithRetry(
               'gemini-3-flash-preview',
               prompt,
-              undefined,
+              { maxOutputTokens: 1024 },
               2, // 2 retries
               'AI_NARRATIVE_PLAN'
           );
@@ -1335,7 +1342,7 @@ ${objectivesContext}
       const response = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
-          { maxOutputTokens: 800 },
+          { maxOutputTokens: 1024 },
           1, // 1 Retry
           'AI_INTRO'
       );
@@ -1360,85 +1367,11 @@ ${objectivesContext}
     }
   }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
 
-  const generateSessionSummary = useCallback(async () => {
-    // Collect summaries
-    const summaries = allSessionSummariesRef.current;
-    if (summaries.length === 0) return;
-
-    // Get the latest packet to append to the memory
-    const latestPacket = summaries[summaries.length - 1];
-    
-    // Recursive: Feed the *previous* mid-term memory back into the input
-    const previousMemoryText = currentSessionContextRef.current?.text || "";
-
-    // NEW: Get Transition History
-    const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
-
-    const taskSection = `<task>
-[GENERAL INSTRUCTIONS]
-You are maintaining a structured "Mid-Term Memory" log of a workout session. 
-Update the EXISTING SUMMARY using the NEW TELEMETRY and TRANSITION HISTORY.
-
-[FORMATTING RULES]
-1. Output strictly in the format: "[STATE_NAME] summary of performance in this state".
-2. Review the RECENT STATE TRANSITIONS. Ensure EVERY state that has occurred (e.g., [WARMUP], [MAIN_ACTIVE]) has a corresponding summary line.
-3. If a state appears in the transitions but not in the existing summary (e.g. short-lived WARMUP), create a new entry for it summarizing that phase was completed.
-4. If the state exists in the previous summary, update its description with the new data.
-5. Keep summaries objective, concise, and technical. No personality or fluff. Do not use markdown bolding.
-</task>`;
-
-    const missionProfileSection = `<mission_profile>
-Goal: ${currentObjective.title}
-</mission_profile>`;
-
-    const midTermMemorySection = `<mid_term_memory>
-${previousMemoryText || "(No history yet)"}
-</mid_term_memory>`;
-
-    const transitionHistorySection = `<transition_history>
-${transitionHistory || "(No transitions yet)"}
-</transition_history>`;
-
-    const currentMinutePacketSection = `<current_minute_packet>
-Minute: ${summaries.length}
-State: ${latestPacket.sessionState}
-Avg HR: ${latestPacket.avg} BPM
-Max HR: ${latestPacket.max} BPM
-Insight: "${latestPacket.insight || 'N/A'}"
-</current_minute_packet>`;
-
-    const prompt = `${taskSection}\n\n${missionProfileSection}\n\n${midTermMemorySection}\n\n${transitionHistorySection}\n\n${currentMinutePacketSection}\n\nOutput the updated state-based summary block:`;
-
-    try {
-        addLog(`AI_REQUEST: Recursive Mid-Term Memory Update...`);
-        addLog(`[DEBUG_MID_TERM_PROMPT] ${prompt}`); 
-
-        const response = await generateContentWithRetry(
-            'gemini-3-flash-preview',
-            prompt,
-            undefined, // No config
-            1, // 1 Retry
-            'AI_MID_TERM_MEMORY'
-        );
-        
-        const tokenUsage = extractUsage(response);
-        const summaryText = response.text || "Trends processing...";
-        currentSessionContextRef.current = { text: summaryText, prompt, tokenUsage };
-        
-        addLog(`[MID_TERM_MEMORY] ${summaryText}`);
-        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
-    } catch (e) {
-        addLog(`AI_WARN: Failed to update session context.`);
-    }
-
-  }, [currentObjective, addLog, generateContentWithRetry]);
-
   const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
     const summaries = allSessionSummariesRef.current;
     if (summaries.length === 0) return;
 
     const lastSummary = summaries[summaries.length - 1];
-    const midTermContext = currentSessionContextRef.current ? currentSessionContextRef.current.text : "N/A";
     // Get Mission Profile text
     const missionProfileText = missionProfileRef.current ? missionProfileRef.current.text : "Standard Protocol";
     const narrativeMissionPlanText = narrativeMissionPlanRef.current ? narrativeMissionPlanRef.current.text : "Standard Narrative";
@@ -1511,15 +1444,11 @@ Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinu
 ${transitionHistory}
 </transition_history>`;
 
-    const midTermMemorySection = `<mid_term_memory>
-${midTermContext}
-</mid_term_memory>`;
-
     const shortTermContextSection = `<short_term_context>
 Last Minute Insight: ${lastSummary.insight || "N/A"}
 </short_term_context>`;
 
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionStatsSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${midTermMemorySection}\n\n${shortTermContextSection}`;
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionStatsSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${shortTermContextSection}`;
 
     try {
         addLog(`AI_REQUEST: Generating Final Session Report...`);
@@ -1528,7 +1457,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         const response = await generateContentWithRetry(
             'gemini-3-flash-preview',
             prompt,
-            { maxOutputTokens: 1000 },
+            { maxOutputTokens: 1536 },
             1, // 1 Retry
             'AI_FINAL_REPORT'
         );
@@ -1643,10 +1572,11 @@ ${objectiveStatus}
 [CURRENT SESSION STATE]: ${summary.sessionState}
 </objective_tracker>`;
 
-    // 5. Mid-Term Memory Section (Semi-Volatile)
-    const midTermMemorySection = `<mid_term_memory>
-${currentSessionContextRef.current ? currentSessionContextRef.current.text : "No overall trend summary available yet."}
-</mid_term_memory>`;
+    // 5. Transition History Section (Semi-Volatile)
+    const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
+    const transitionHistorySection = `<transition_history>
+${transitionHistory || "No state transitions recorded."}
+</transition_history>`;
 
     // 6. Short-Term Context Section (Semi-Volatile)
     const shortTermContextSection = `<short_term_context>
@@ -1680,7 +1610,7 @@ Wall Time: ${wallTime}
 Active Time: ${activeTimeStr}
 </current_timers>`;
 
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${objectiveTrackerSection}\n\n${midTermMemorySection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}\n\n${currentTimersSection}`;
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}\n\n${currentTimersSection}`;
 
     try {
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
@@ -1689,40 +1619,69 @@ Active Time: ${activeTimeStr}
       const response = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
-          { responseMimeType: 'application/json', maxOutputTokens: 400 },
+          { responseMimeType: 'application/json', maxOutputTokens: 600 },
           1, // 1 Retry
           'AI_INSIGHT'
       );
 
       const tokenUsage = extractUsage(response);
       const insightRaw = response.text || "{}";
+      const cleanedRaw = cleanJSONResponse(insightRaw);
       addLog(`AI_RESPONSE: Analysis complete.`);
-      addLog(`AI_INSIGHT_JSON: ${insightRaw}`);
+      addLog(`AI_INSIGHT_JSON: ${cleanedRaw}`);
       if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 
       let insightData: any;
       try {
-        insightData = JSON.parse(insightRaw);
+        insightData = JSON.parse(cleanedRaw);
         // Handle case where LLM returns an array of objects
         if (Array.isArray(insightData) && insightData.length > 0) {
           insightData = insightData[0];
         }
         
-        // Ensure all required fields exist, providing defaults if missing
-        // Default saliency_score to 10 if missing to ensure voicing as per user request
-        if (typeof insightData.saliency_score !== 'number') insightData.saliency_score = 10;
-        if (!insightData.milestone_tag_id) insightData.milestone_tag_id = "none";
-        if (!insightData.coaching_directive) insightData.coaching_directive = "MAINTAIN";
-        if (!insightData.persona_narrative) insightData.persona_narrative = insightRaw;
-        if (!insightData.tts_instruction) insightData.tts_instruction = personaConfig.ttsBaselineInstruction;
-        if (!insightData.perceived_state) insightData.perceived_state = summary.sessionState || "unknown";
+        // Robust field extraction
+        const getScore = (data: any) => {
+           if (typeof data.saliency_score === 'number') return data.saliency_score;
+           if (typeof data.salience_score === 'number') return data.salience_score;
+           if (typeof data.saliencyScore === 'number') return data.saliencyScore;
+           return 10; // Default to high score to ensure voicing if score is missing
+        };
+
+        const getNarrative = (data: any) => {
+           return data.persona_narrative || data.narrative || data.insight || data.message || cleanedRaw;
+        };
+
+        const getInstruction = (data: any) => {
+           return data.tts_instruction || data.ttsInstruction || data.voice_instruction || personaConfig.ttsBaselineInstruction;
+        };
+
+        const getMilestone = (data: any) => {
+           return data.milestone_tag_id || data.milestoneTagId || data.milestone || "none";
+        };
+
+        const getDirective = (data: any) => {
+           return data.coaching_directive || data.coachingDirective || data.directive || "MAINTAIN_PACE";
+        };
+
+        const getState = (data: any) => {
+           return data.perceived_state || data.perceivedState || data.state || (summary.sessionState || "unknown");
+        };
+
+        insightData = {
+          saliency_score: getScore(insightData),
+          milestone_tag_id: getMilestone(insightData),
+          coaching_directive: getDirective(insightData),
+          persona_narrative: getNarrative(insightData),
+          tts_instruction: getInstruction(insightData),
+          perceived_state: getState(insightData)
+        };
       } catch (e) {
         addLog(`AI_ERROR: JSON parse failed. Raw: ${insightRaw}`);
         insightData = {
-          saliency_score: 10, // Default to high score to ensure voicing on failure
+          saliency_score: 10, 
           milestone_tag_id: "none",
-          coaching_directive: "MAINTAIN",
-          persona_narrative: insightRaw,
+          coaching_directive: "MAINTAIN_PACE",
+          persona_narrative: cleanedRaw, // Use cleanedRaw if parse fails to avoid markdown clutter
           tts_instruction: personaConfig.ttsBaselineInstruction,
           perceived_state: summary.sessionState || "unknown"
         };
@@ -1742,10 +1701,6 @@ Active Time: ${activeTimeStr}
         allSessionSummariesRef.current[logIndex].perceivedState = insightData.perceived_state;
         allSessionSummariesRef.current[logIndex].rawJson = insightRaw;
 
-        // Store structured memory context snapshot
-        if (currentSessionContextRef.current) {
-            allSessionSummariesRef.current[logIndex].sessionContextSummary = currentSessionContextRef.current; 
-        }
         allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage; // Store token usage
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
       }
@@ -1762,7 +1717,6 @@ Active Time: ${activeTimeStr}
             rawJson: insightRaw,
             isAnalyzing: false, 
             prompt, 
-            sessionContextSummary: currentSessionContextRef.current || undefined, 
             tokenUsage 
         } : s
       ));
@@ -1941,12 +1895,7 @@ Active Time: ${activeTimeStr}
     // Trigger standard analysis
     requestAiInsight(newSummary);
 
-    // Check if we should update mid-term memory (After 1st packet)
-    if (allSessionSummariesRef.current.length >= 1) {
-        generateSessionSummary();
-    }
-
-  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, generateSessionSummary, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective, currentSessionState, intervalCount, intervalCountGoal]);
+  }, [addLog, trainingGoal, isVoiceEnabled, selectedPersona, speakInsight, chattiness, requestAiInsight, age, weight, gender, zones, currentObjective, currentSessionState, intervalCount, intervalCountGoal]);
 
   const calcRef = useRef(calculateMinuteSummary);
   useEffect(() => { calcRef.current = calculateMinuteSummary; }, [calculateMinuteSummary]);
@@ -2116,7 +2065,6 @@ Active Time: ${activeTimeStr}
     sessionIntroRef.current = null; // Clear intro ref on restart
     missionProfileRef.current = null; // Clear mission profile
     narrativeMissionPlanRef.current = null; // Clear narrative plan
-    currentSessionContextRef.current = null; // Clear memory ref
     finalSessionReportRef.current = null; // Clear final report
     setFinalReportText(null); // Clear UI report
     setSummaries([]);
@@ -2185,7 +2133,6 @@ Active Time: ${activeTimeStr}
       currentMinuteRef.current = []; 
       allSessionSummariesRef.current = []; 
       sessionTransitionsRef.current = []; // Clear transitions before first log
-      currentSessionContextRef.current = null; // Clear mid-term memory
       narrativeMissionPlanRef.current = null; // Clear narrative plan on start
 
       // Log initial transition away from IDLE

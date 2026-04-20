@@ -4,20 +4,20 @@ This document describes the structure and elements of the periodic LLM prompt us
 
 ## 1. Task Section (`<task>`)
 Defines the core logic and output requirements. This is the most static part of the prompt.
-**Constraint**: 400 `maxOutputTokens`.
+**Constraint**: 600 `maxOutputTokens` in `generationConfig`.
 
 - **General Instructions**: 
     - **Data Input**: How to interpret the telemetry in `<current_minute_packet>`.
     - **PII Isolation**: Prohibition on guessing user identity.
     - **Signal Noise**: Prioritization of trends over individual telemetry spikes.
     - **Telemetry Abstraction (Conditional)**: Instruction to use qualitative descriptors if enabled.
-    - **Anti-Repetition**: Rules for varying responses based on `<short_term_context>` and `<mid_term_memory>`.
+    - **Anti-Repetition**: Rules for varying responses based on `<short_term_context>`.
     - **Corrections**: Logic for pace steering based on `<current_minute_packet>` and target zones.
     - **Milestones**: Instructions for incorporating narrative events from `<mission_profile>` based on `<current_timers>`.
     - **Goal**: Instructions to remark on state changes in `<objective_tracker>`.
-    - **Context Usage**: Guidance on using `<objective_tracker>` and `<mid_term_memory>` for tone calibration.
+    - **Context Usage**: Guidance on using `<objective_tracker>` and `<transition_history>` for tone calibration.
     - **Saliency Scoring**: Requirements for the 1-10 urgency score.
-- **Output Format (JSON)**: Strict requirement to return a JSON object (see Section 5).
+- **Output Format (JSON)**: Strict requirement to return a JSON object (see Section 9).
 - **Markdown Constraint**: Hard constraint to NOT use markdown in the final output.
 
 ## 2. Persona Section (`<persona>`)
@@ -43,8 +43,8 @@ Provides real-time progress against goals.
 - **Compliance**: Ratio of performance minutes spent in target zones.
 - **Current Session State**: The functional state (e.g., `WARMUP`, `MAIN_ACTIVE`, `RECOVERY`).
 
-## 5. Mid-Term Memory Section (`<mid_term_memory>`)
-A recursive summary of the overall session trend updated every minute.
+## 5. Transition History Section (`<transition_history>`)
+Log of all state changes within the session (e.g., `WARMUP -> MAIN_ACTIVE`).
 
 ## 6. Short-Term Context Section (`<short_term_context>`)
 Maintains continuity by providing the immediate past (previous 2 minutes of metrics and feedback).

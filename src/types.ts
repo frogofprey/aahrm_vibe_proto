@@ -47,7 +47,6 @@ export interface MinuteSummary {
   insight?: string;
   isAnalyzing?: boolean;
   prompt?: string;
-  sessionContextSummary?: SessionContext;
   heartPoints: number;
   calories: number;
   tokenUsage?: TokenUsage;
