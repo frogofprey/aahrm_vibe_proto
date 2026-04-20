@@ -4,6 +4,7 @@ This document describes the structure and elements of the final session report L
 
 ## 1. Task Section (`<task>`)
 Defines the core logic and constraints for the report.
+**Constraint**: 1,000 `maxOutputTokens`.
 
 - **General Instructions**: Generate a final session report based on the provided context.
 - **Constraints**: 

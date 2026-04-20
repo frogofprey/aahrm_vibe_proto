@@ -53,7 +53,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Narrative Context (if available).
     *   Telemetry Abstraction Instruction (Conditional).
     *   Activity Context (Conditional).
-*   **Output**: A short motivating opening line.
+*   **Output**: A short motivating opening line. (800 `maxOutputTokens`).
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---
@@ -76,7 +76,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
     *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
-*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions.
+*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (400 `maxOutputTokens`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
 
 ### E. Mid-Term Memory Update
@@ -111,7 +111,7 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
     *   State Transition History.
     *   Mid-Term Trend.
     *   Last Minute Insight.
-*   **Output**: A four-sentence maximum concluding summary.
+*   **Output**: A four-sentence maximum concluding summary. (1,000 `maxOutputTokens`).
 *   **Side Effect**: Triggers **TTS Synthesis**.
 
 ---

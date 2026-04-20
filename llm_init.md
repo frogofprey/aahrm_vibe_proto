@@ -31,6 +31,7 @@ Used to establish the story arc for the session. Structured using XML-like tags,
 
 ## 2. Session Intro Prompt
 Used to generate the first interaction with the user.
+**Constraint**: 800 `maxOutputTokens`.
 
 ### `<task>`
 - **General Instructions**: Generate an introduction referencing parameters naturally.

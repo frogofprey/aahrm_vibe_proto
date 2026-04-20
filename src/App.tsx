@@ -1335,7 +1335,7 @@ ${objectivesContext}
       const response = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
-          undefined, // No config
+          { maxOutputTokens: 800 },
           1, // 1 Retry
           'AI_INTRO'
       );
@@ -1528,7 +1528,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         const response = await generateContentWithRetry(
             'gemini-3-flash-preview',
             prompt,
-            undefined, // No config
+            { maxOutputTokens: 1000 },
             1, // 1 Retry
             'AI_FINAL_REPORT'
         );
@@ -1689,7 +1689,7 @@ Active Time: ${activeTimeStr}
       const response = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
-          { responseMimeType: 'application/json' },
+          { responseMimeType: 'application/json', maxOutputTokens: 400 },
           1, // 1 Retry
           'AI_INSIGHT'
       );

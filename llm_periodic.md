@@ -4,6 +4,7 @@ This document describes the structure and elements of the periodic LLM prompt us
 
 ## 1. Task Section (`<task>`)
 Defines the core logic and output requirements. This is the most static part of the prompt.
+**Constraint**: 400 `maxOutputTokens`.
 
 - **General Instructions**: 
     - **Data Input**: How to interpret the telemetry in `<current_minute_packet>`.
