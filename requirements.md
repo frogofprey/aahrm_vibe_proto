@@ -29,11 +29,11 @@
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**:
     *   **Wall Clock**: Display the total elapsed time of the session in `HH:MM:SS` format.
-    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP` or `PAUSE` must not count towards the Time Objective. *For Interval Strategies, `RECOVERY` periods are included in Performance Duration as they are integral to the interval cycle.*
+    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP`, `PAUSE`, or `RECOVERY` must not count towards the Time Objective or Compliance denominator.
 *   **Metric Tracking**:
     *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5. *Accumulates during ALL states (including Warmup/Recovery).*
     *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender). *Accumulates during ALL states.*
-    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. This ensures users are not penalized for non-performance states (Warmup/Recovery). *For Interval Strategies, compliance includes Recovery periods where HR is below the target zone floor, as these are planned valleys.*
+    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. Accuracy is ensured through majority-state identification, preventing fractional transition packets from polluting compliance data. Warmup and Recovery time are excluded from the denominator.
     *   **Gender Input**: Added selector (Male/Female) to support accurate calorie calculation.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal (including **Interval Count** and **Interval Time** if applicable).
@@ -42,7 +42,7 @@
 *   **Narrative Mission Plan**: Upon session initialization, the system must generate a "Narrative Mission Plan" using the selected Persona.
     *   **Persona Customization**: The generation prompt incorporates the persona's specific `missionProfile` instructions to tailor the story arc.
     *   **State Transitions**: Explicitly define narrative triggers for "Warmup Completion" and "Mission Completion".
-    *   **Narrative Events**: Create distinct plot points spaced at least 1 minute apart.
+    *   **Timeline Parsing**: The system must extract structured "Narrative Milestones" from the generation response (parsing the `[TIMELINE]` block). These milestones include a timestamp (seconds), label, and narrative context, stored in a local array for AI context syncing.
     *   **Integration**: The generated plan serves as the narrative arc for the AI Coach to follow during the session.
 *   **Final Session Report**: Upon stopping a session, the system must generate a 2-sentence summary report using the session duration, average HR, **peak HR**, Total Calories, and Total Heart Points.
     *   **Compliance Data**: The report must cite compliance based on Performance Minutes (e.g., "15/20 performance minutes compliant").
@@ -50,7 +50,7 @@
     *   **Audio**: If the voice profile is enabled, this final report must be read aloud via TTS.
 *   **Session Export**: Automatically generate and download **two** local text files when a session is stopped.
     1.  **Full Log** (`session_YYYYMMDDHHMM.txt`):
-        *   Contains full debug details, prompts, raw telemetry, mission profile, **narrative mission plan**, mid-term memory, and final report diagnostics.
+        *   Contains full debug details, prompts, raw telemetry, mission profile, **narrative mission plan**, **parsed narrative milestones**, mid-term memory, and final report diagnostics.
         *   Header must include Subject Age, **Subject Weight**, **Subject Gender**, Training Objective, **Session Objectives** (Time, HP, Kcal, **Intervals**), and **Intervals Completed** (if applicable).
         *   Body must include per-minute breakdown of Calories and Heart Points.
     2.  **User Summary** (`usersession_YYYYMMDDHHMM.txt`):
@@ -60,8 +60,8 @@
 
 ### 1.4 AI Coaching & Aggregation
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
-    *   **Frame State Priority**: The "State" of a minute is determined by the highest priority state observed during that minute: `ERROR` > `PAUSE` > `RECOVERY` > `BONUS_ACTIVE` > `MAIN_ACTIVE` > `WARMUP`.
-    *   **Majority State**: For Interval Strategies, the "State" of a minute is determined by the majority state observed during that minute to ensure accurate labeling of transitions (e.g., a minute that is 40s Recovery and 20s Active is labeled as Recovery).
+    *   **State Identification**:
+        *   **Majority State**: The "State" of a minute packet is determined by the **majority state** observed during that 60-second window across all strategies. This ensures mathematically consistent labeling of transition packets and prevents "warmup bleed" into performance metrics.
     *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), Sample Count, Frame State, Raw value array.
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
@@ -72,7 +72,11 @@
         *   Current Heart Points / Target Heart Points
         *   Current Calories / Target Calories
         *   Compliance: X/Y **Performance Minutes**
+        *   **State Awareness**: The `<objective_tracker>` must explicitly include the `[CURRENT SESSION STATE]`.
+        *   **History Precision**: The `<short_term_context>` history must include the specific session state for each historical packet to aid the AI in understanding transitions.
+        *   **Live Telemetry**: Include the **Current BPM** at the time of trigger alongside minute metrics.
 *   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, Mission Profile, and **Narrative Plan**) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
+    *   **Response Handling**: The system must use a robust JSON cleaner to strip Markdown formatting from AI responses and handle key variations (e.g., `saliency_score` vs `saliencyScore`).
     *   **Update Frequency**: Insights are requested every 60 seconds.
     *   **Active Time Reporting**:
         *   During `INIT` or `WARMUP`, `Active_Time` is reported as **'WARMING UP'**. The first update is at 1:00.

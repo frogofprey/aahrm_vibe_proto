@@ -76,6 +76,13 @@ export interface ZoneConfig {
   textClass: string;
 }
 
+export interface NarrativeMilestone {
+  timeInSeconds: number;
+  timeLabel: string;
+  label: string;
+  narrative: string;
+}
+
 export interface TrainingObjective {
   title: string;
   targetZones: number[];

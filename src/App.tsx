@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse } from './types';
+import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
 import HeartRateChart from './components/HeartRateChart';
@@ -140,11 +140,11 @@ Data Input: You will receive a <current_minute_packet> containing an array of ra
 PII Isolation: Do not attempt to guess or reference the user's age or identity. Use the provided "Zone" context in <mission_profile> as the absolute truth for intensity.
 Signal Noise: Prioritize trends over individual samples.
 {{TELEMETRY_CONSTRAINT}}
-Anti-Repetition: Review <short_term_context> and <mid_term_memory> before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
+Anti-Repetition: Review <short_term_context> and <transition_history> before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
 Corrections: the input telemetry in <current_minute_packet> will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified threshold or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. Avoid the term redline unless referring to MHR. 
 Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion in <mission_profile>. Use the active_time provided in <current_timers> to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. HARD CONSTRAINT: Do NOT process milestones during warmup state. 
 Goal: The current state is shown in the <objective_tracker> block. Be sure to remark on state changes when appropriate. A good output should consist of a Pace Steering Message followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the Pace Steering Message should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this if needed. Ensure that milestone updates don't contradict Pace Steering Message guidance.   
-Context Usage: You will receive an <objective_tracker> and <mid_term_memory>. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
+Context Usage: You will receive an <objective_tracker> and <transition_history>. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
 ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short an punchy. 
 Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
 1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
@@ -262,6 +262,7 @@ const App: React.FC = () => {
   // Session Logging Ref (Stores full history for file export)
   const allSessionSummariesRef = useRef<MinuteSummary[]>([]);
   const sessionTransitionsRef = useRef<{ timestamp: string; message: string }[]>([]); // New Transition Log Ref
+  const narrativeMilestonesRef = useRef<NarrativeMilestone[]>([]);
 
   const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
@@ -852,6 +853,14 @@ const App: React.FC = () => {
         contentDebug += `--------------------------------------------------\n\n`;
     }
 
+    if (narrativeMilestonesRef.current && narrativeMilestonesRef.current.length > 0) {
+        contentDebug += `[PARSED NARRATIVE MILESTONES]\n`;
+        narrativeMilestonesRef.current.forEach(m => {
+            contentDebug += `  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}\n`;
+        });
+        contentDebug += `--------------------------------------------------\n\n`;
+    }
+
     if (sessionIntroRef.current) {
         contentDebug += `[SESSION INTRO]\n`;
         contentDebug += `Prompt: ${sessionIntroRef.current.prompt}\n`;
@@ -1273,9 +1282,53 @@ ${sessionContext}${activityContext}
           addLog(`[NARRATIVE_PLAN] ${narrativeText}`);
           if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
 
+          // Parsing Narrative Milestones
+          // Look for everything between [TIMELINE]: and the next section [SECTION] or end of string
+          const timelineRegex = /\[TIMELINE\]:([\s\S]*?)(?=\n\[|$)/i;
+          const timelineMatch = narrativeText.match(timelineRegex);
+          const rawTimeline = timelineMatch ? timelineMatch[1].trim() : "";
+          const lines = rawTimeline.split('\n').filter(l => l.trim() !== "");
+          
+          const parsedMilestones: NarrativeMilestone[] = [];
+          
+          lines.forEach(line => {
+              // Regex for "M:SS [Label]: Narrative" or "HH:MM:SS [Label]: Narrative"
+              // Supporting flexible whitespace and formats
+              const lineMatch = line.match(/^\s*(\d+[:\d+]*)\s*\[(.*?)\]:\s*(.*)$/);
+              if (lineMatch) {
+                  const timeLabel = lineMatch[1].trim();
+                  const label = lineMatch[2].trim();
+                  const narrative = lineMatch[3].trim();
+                  
+                  // Convert timeLabel to seconds
+                  const parts = timeLabel.split(':').map(Number);
+                  let timeInSeconds = 0;
+                  if (parts.length === 1) { // Just minutes or seconds? Assume minutes if no colon
+                      timeInSeconds = parts[0] * 60;
+                  } else if (parts.length === 2) { // MM:SS
+                      timeInSeconds = parts[0] * 60 + parts[1];
+                  } else if (parts.length === 3) { // HH:MM:SS
+                      timeInSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                  }
+                  
+                  parsedMilestones.push({ timeInSeconds, timeLabel, label, narrative });
+              }
+          });
+          
+          narrativeMilestonesRef.current = parsedMilestones;
+          
+          if (parsedMilestones.length > 0) {
+              addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES ---`);
+              parsedMilestones.forEach(m => {
+                  addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}`);
+              });
+              addLog(`SYSTEM: -----------------------------------------`);
+          }
+
       } catch (e) {
           addLog(`AI_ERROR: Narrative Mission Plan generation failed. ${e instanceof Error ? e.message : ''}`);
           narrativeMissionPlanRef.current = null;
+          narrativeMilestonesRef.current = [];
       }
   }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, generateContentWithRetry]);
 
@@ -1502,12 +1555,12 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
 ${BASE_SYSTEM_INSTRUCTION.replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}
 
 [OUTPUT FORMAT]
-Return the response as a JSON object with the following structure:
+Return the response as a JSON object with the following structure. Return raw JSON only. Do not wrap in markdowncode fences or backticks.
 {
   "saliency_score": number,  
   "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none" only return the milestone name (the value in brackets) - '10:00 [Encounter Midpoint]: Boss at half health - stamina check'  should simply return "Encounter Midpoint"
   "coaching_directive": string, // CRITICAL: one of the following: "MAINTAIN_PACE", "INCREASE_EFFORT", "DECREASE_EFFORT", "EMERGENCY_STOP", "PREPARE_TRANSITION"
-  "persona_narrative": string, // The flavor text, constrained by the persona element.
+  "persona_narrative": string, // The flavor text, constrained by the persona element. Format as pure text; don't use additional whitespace for formatting. 
   "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS. never instruct the TTS to slow down
   "perceived_state": string // Echo: "warmup", "main_active", "recovery" , "bonus_active" , "pause" , "error"
 }
@@ -1546,25 +1599,24 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
             historyContext += `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
         }
         const prev = allSummaries[0];
-        historyContext += `[PREVIOUS UPDATE (Minute 1)]\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
+        historyContext += `[PREVIOUS UPDATE (Minute 1)]\nState: ${prev.sessionState}\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
     } else {
         // Packet #3+: History is Packet #N-2 and Packet #N-1
         const prev2 = allSummaries[currentIndex - 2];
         const prev1 = allSummaries[currentIndex - 1];
         
-        historyContext += `[2 MINUTES AGO]\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
-        historyContext += `[1 MINUTE AGO]\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
+        historyContext += `[2 MINUTES AGO]\nState: ${prev2.sessionState}\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
+        historyContext += `[1 MINUTE AGO]\nState: ${prev1.sessionState}\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
     }
     // --- HISTORY BUILDER END ---
 
     // 4. Objective Tracker Section (Semi-Volatile)
-    const currentPerformanceMinutes = (performanceDurationRef.current / 60000).toFixed(1);
+    const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
     const strategy = (currentObjective as any).transitionStrategy || "normal state";
-    let objectiveStatus = `Time: ${currentPerformanceMinutes} / ${sessionDurationGoal} mins`;
+    let objectiveStatus = `Time: ${totalPerformanceMinutes.toFixed(1)} / ${sessionDurationGoal} mins`;
     if (strategy === "interval state" || strategy === "fixed interval state") {
         objectiveStatus = `Intervals: ${intervalCount} / ${intervalCountGoal}\nInterval Time: ${intervalTime} mins`;
     }
-    const totalPerformanceMinutes = runningMetricsRef.current.performanceMinutes;
     objectiveStatus += `\nCompliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${totalPerformanceMinutes.toFixed(1)} performance minutes in target zone`;
     
     const objectiveTrackerSection = `<objective_tracker>
@@ -1585,6 +1637,7 @@ ${historyContext || "No recent history available."}
 
     // 7. Current Minute Packet Section (Volatile)
     const currentMinutePacketSection = `<current_minute_packet>
+- Current BPM: ${currentHR}
 - Average BPM: ${summary.avg}
 - Max BPM: ${summary.max}
 - Min BPM: ${summary.min}
@@ -1758,37 +1811,16 @@ Active Time: ${activeTimeStr}
     // --- FRAME STATE CALCULATION ---
     const strategy = (currentObjective as any).transitionStrategy || "normal state";
     const isIntervalStrategy = strategy === "interval state" || strategy === "fixed interval state";
-    const observedStates = sessionStatesInFrameRef.current;
-    let effectiveFrameState = currentSessionState;
-
-    if (isIntervalStrategy) {
-        // For interval state, use the majority state in the frame
-        let maxSamples = -1;
-        let majorityState = currentSessionState;
-        stateSamplesInFrameRef.current.forEach((count, state) => {
-            if (count > maxSamples) {
-                maxSamples = count;
-                majorityState = state;
-            }
-        });
-        effectiveFrameState = majorityState;
-    } else {
-        // Prioritize states encountered during the frame based on: ERROR > PAUSE > RECOVERY > BONUS_ACTIVE > MAIN_ACTIVE > WARMUP
-        if (observedStates.has(SessionState.ERROR)) {
-            effectiveFrameState = SessionState.ERROR;
-        } else if (observedStates.has(SessionState.PAUSE)) {
-            effectiveFrameState = SessionState.PAUSE;
-        } else if (observedStates.has(SessionState.RECOVERY)) {
-            effectiveFrameState = SessionState.RECOVERY;
-        } else if (observedStates.has(SessionState.BONUS_ACTIVE)) {
-            effectiveFrameState = SessionState.BONUS_ACTIVE;
-        } else if (observedStates.has(SessionState.MAIN_ACTIVE)) {
-            effectiveFrameState = SessionState.MAIN_ACTIVE;
-        } else if (observedStates.has(SessionState.WARMUP)) {
-            effectiveFrameState = SessionState.WARMUP;
+    
+    let maxSamples = -1;
+    let majorityState = currentSessionState;
+    stateSamplesInFrameRef.current.forEach((count, state) => {
+        if (count > maxSamples) {
+            maxSamples = count;
+            majorityState = state;
         }
-    }
-    // Else fall back to current state (likely INIT)
+    });
+    let effectiveFrameState = majorityState;
     
     // Reset frame state tracker for the next minute, but seed it with the current state
     sessionStatesInFrameRef.current.clear();
@@ -1858,11 +1890,9 @@ Active Time: ${activeTimeStr}
     runningMetricsRef.current.calories += calories;
     
     // Only increment Compliance Denominator if in active performance states
-    // This allows WARMUP and RECOVERY to be ignored for percentage calculation
-    // For interval state, RECOVERY is an integral part of the performance
+    // we should only be tracking compliance time when we're in main_active and bonus_active states.
     const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || 
-                               effectiveFrameState === SessionState.BONUS_ACTIVE ||
-                               (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY);
+                               effectiveFrameState === SessionState.BONUS_ACTIVE;
     
     if (isPerformanceState) {
         const minutesElapsed = values.length / 60;
