@@ -47,7 +47,7 @@ Provides real-time progress against goals.
 Log of all state changes within the session (e.g., `WARMUP -> MAIN_ACTIVE`).
 
 ## 6. Short-Term Context Section (`<short_term_context>`)
-Maintains continuity by providing the immediate past (previous 2 minutes of metrics and feedback).
+Maintains continuity by providing the immediate past (previous 3 minutes of metrics and feedback).
 
 ## 7. Current Minute Packet Section (`<current_minute_packet>`)
 The volatile telemetry data for the current minute.

@@ -1206,17 +1206,14 @@ const App: React.FC = () => {
       `;
       } else if (strategy === "normal state") {
           exampleFormat = `
-      [THEME]: Operation Laser-Pointer: The steady-state siege against the "Chubby-Chonk" Boss to unlock the Golden Yarn Trophy!
-      [TIMELINE]:
-       0:00 [Warmup Complete]: Boss fight has begun in earnest; user should be in the target heart rate zone now until recovery. 
-       5:00 [Engagement Phase]: Boss engages secret weapon laser pointer to distract the user; user should be in the target heart rate zone now until recovery. 
-      10:00 [Encounter Midpoint]: Boss at half health - stamina check 
-      15:00 [Five Minute Warning]: Boss desperate and uses his sisal shield
-      18:00 [Two Minute Warning]: Boss on last legs and desperate, more power to the laser; maintain current effort to defeat the boss. 
-      20:00 [Boss Down]: Boss defeated; time to celebrate the victory. User can either recover or go for bonus points. 
-      [Mission Complete]:	VICTORY! the Golden Yarn Trophy is yours!
-      [Maguffin]: Golden Yarn Trophy
-      [BONUS]:	SECRET STAGE UNLOCKED! the Golden Yarn Trophy is enhanced by your extra effort. The laser pointer glows even more brightly. 
+      [THEME]: [Insert the high-level thematic setting here, e.g., Sci-Fi, Fantasy, Gym]
+      [MAGUFFIN]: [Insert the specific, thematic item or goal the user is working toward]
+      [TIMELINE]
+      0:00 [Event Name] || [Insert thematic description of the session beginning. Do not use persona-specific slang.]
+      5:00 [Event Name] || [Insert description of a mid-point complication or environmental change.]
+      8:00 [Event Name] || [Insert description of the climax or final push.]
+      10:00 [Event Name] || [Insert description of the resolution and cooldown transition.]
+      [BONUS]:	[Insert description of bonus rewards for continuing the session] 
       `;
       } else {
           // Default: Fixed State
@@ -1600,11 +1597,22 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
         }
         const prev = allSummaries[0];
         historyContext += `[PREVIOUS UPDATE (Minute 1)]\nState: ${prev.sessionState}\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
+    } else if (currentIndex === 2) {
+        // Packet #3: History is Intro + Packet #1 + Packet #2
+        if (sessionIntroRef.current) {
+            historyContext += `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
+        }
+        const prev1 = allSummaries[0];
+        const prev2 = allSummaries[1];
+        historyContext += `[MINUTE 1]\nState: ${prev1.sessionState}\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n\n`;
+        historyContext += `[MINUTE 2]\nState: ${prev2.sessionState}\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n`;
     } else {
-        // Packet #3+: History is Packet #N-2 and Packet #N-1
+        // Packet #4+: History is last 3 updates
+        const prev3 = allSummaries[currentIndex - 3];
         const prev2 = allSummaries[currentIndex - 2];
         const prev1 = allSummaries[currentIndex - 1];
         
+        historyContext += `[3 MINUTES AGO]\nState: ${prev3.sessionState}\nMetrics: Avg ${prev3.avg}, Max ${prev3.max}\nCoach Feedback: "${prev3.insight || 'N/A'}"\nCoaching Directive: "${prev3.coachingDirective || 'N/A'}"\n\n`;
         historyContext += `[2 MINUTES AGO]\nState: ${prev2.sessionState}\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
         historyContext += `[1 MINUTE AGO]\nState: ${prev1.sessionState}\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
     }
