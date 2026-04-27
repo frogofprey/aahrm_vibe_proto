@@ -1006,10 +1006,13 @@ const App: React.FC = () => {
   const generateContentWithRetry = useCallback(async (model: string, contents: any, generationConfig: any, maxRetries: number, logPrefix: string) => {
       let attempt = 0;
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const startTime = performance.now();
 
       while (true) {
           try {
-              return await ai.models.generateContent({ model, contents, ...generationConfig });
+              const response = await ai.models.generateContent({ model, contents, ...generationConfig });
+              const durationMs = performance.now() - startTime;
+              return { response, durationMs };
           } catch (e: any) {
               const errStr = String(e);
               // Fast fail on client errors
@@ -1044,6 +1047,7 @@ const App: React.FC = () => {
 
     const maxRetries = 1; // Total attempts = 1 initial + 1 retry
     let attempt = 0;
+    const startTime = performance.now();
 
     while (attempt <= maxRetries) {
       try {
@@ -1064,12 +1068,13 @@ const App: React.FC = () => {
           },
         });
         
+        const networkTimeMs = performance.now() - startTime;
+        const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+        console.log(`VOICE_TTS: ${networkTimeStr}`);
+
         // Log token usage for TTS if available
         const tokenUsage = extractUsage(response);
-        if (tokenUsage) {
-            addLog(`VOICE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
-        }
-
+        
         const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
         if (!base64Audio) {
             throw new Error("API returned no audio data");
@@ -1088,6 +1093,17 @@ const App: React.FC = () => {
           24000,
           1,
         );
+
+        const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
+        console.log(`VOICE_TTS: ${audioDurationStr}`);
+
+        const combinedMetrics = `${networkTimeStr} ${audioDurationStr}`;
+
+        if (tokenUsage) {
+            addLog(`VOICE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${combinedMetrics}`);
+        } else {
+            addLog(`VOICE: ${combinedMetrics}`);
+        }
 
         // Queue the audio instead of playing immediately
         audioQueueRef.current.push(audioBuffer);
@@ -1190,19 +1206,20 @@ const App: React.FC = () => {
       let exampleFormat = "";
       if (strategy === "interval state") {
           exampleFormat = `
-      [THEME]: Operation Laser-Pointer: The high-intensity interval chase against the "Chubby-Chonk" Boss!
+      [THEME]: [Insert high-level thematic setting for an interval session here]
+      [MAGUFFIN]: [Insert the specific, thematic goal or item being pursued]
       [TIMELINE]:
-       0:00 [Interval 1 - The First Pounce]: The Boss engages full laser-chase mode! User must push into the target heart rate zone (135+) to evade the barrage.
-       3:00 [Recovery 1 - The Grooming Break]: The Boss retreats to aggressively groom a paw. User must drop back to the recovery zone (115) to shed heat and regroup.
-       6:00 [Interval 2 - The Midnight Zoomies]: Unprovoked Phase Two! The Boss initiates the midnight zoomies. Push back into the target heart rate zone (135+) to match the chaos.
-       9:00 [Recovery 2 - The Cardboard Box]: The Boss is temporarily distracted by a high-value cardboard box. Maintain the recovery zone (115) and catch your breath.
-      12:00 [Interval 3 - The Final Stand]: The Boss goes berserk and summons the red-dot swarm! Final push into the target heart rate zone (135+) to break the sisal shield.
-      15:00 [Recovery 3 - The Nap]: The Boss's stamina is broken; the beast demands a nap. Spin down safely to baseline.
-      18:00 [Boss Defeated]: The Boss is fully asleep. Encounter survived. 
+       0:00 [Interval 1 Name] || [Thematic description of the first high-intensity interval. Encourage effort and target zone engagement.]
+       3:00 [Recovery 1 Name] || [Thematic description of the first recovery period. Encourage heat shedding and heart rate reduction.]
+       6:00 [Interval 2 Name] || [Thematic description of the second high-intensity interval. Escalation of the thematic challenge.]
+       9:00 [Recovery 2 Name] || [Thematic description of the second recovery period. Brief pause in action or regrouping.]
+      12:00 [Interval 3 Name] || [Thematic description of the final high-intensity push or climax.]
+      15:00 [Recovery 3 Name] || [Thematic description of the final cool-down transition.]
+      18:00 [Mission Success Name] || [Resolution of the thematic encounter.]
 
-      [Mission Complete]: VICTORY! The Golden Yarn Trophy is safely secured while the beast slumbers!
-      [Maguffin]: Golden Yarn Trophy
-      [BONUS]: SECRET STAGE UNLOCKED! You kept pedaling while the boss slept. The Golden Yarn Trophy is enhanced, and your laser pointer is upgraded to a prismatic beam.
+      [Mission Complete]: [Final thematic victory message! Summary of accomplishment.]
+      [Maguffin]: [The name of the item or objective secured]
+      [BONUS]: [Description of thematic rewards for continuing past the goal time.]
       `;
       } else if (strategy === "normal state") {
           exampleFormat = `
@@ -1218,13 +1235,13 @@ const App: React.FC = () => {
       } else {
           // Default: Fixed State
           exampleFormat = `
-      [THEME]: Operation Laser-Pointer: The fixed-state mission to secure the Golden Yarn Trophy!
+      [THEME]: [Insert the high-level thematic setting for a fixed-state session here]
       [TIMELINE]:
       (Timeline is blank for fixed state objectives)
 
-      [Mission Complete]: VICTORY! The Golden Yarn Trophy is yours!
-      [Maguffin]: Golden Yarn Trophy
-      [BONUS]: SECRET STAGE UNLOCKED! The Golden Yarn Trophy is enhanced by your extra effort.
+      [Mission Complete]: [Thematic success message! e.g., Objectives secured!]
+      [Maguffin]: [The specific goal item or objective]
+      [BONUS]: [Description of bonus rewards for extra effort beyond the goal.]
       `;
       }
 
@@ -1265,7 +1282,7 @@ ${sessionContext}${activityContext}
           addLog(`AI_REQUEST: Generating Narrative Mission Plan...`);
           addLog(`[DEBUG_NARRATIVE_PLAN_PROMPT] ${prompt}`);
 
-          const response = await generateContentWithRetry(
+          const { response, durationMs } = await generateContentWithRetry(
               'gemini-3-flash-preview',
               prompt,
               { maxOutputTokens: 1024 },
@@ -1277,7 +1294,14 @@ ${sessionContext}${activityContext}
           const narrativeText = response.text || "Narrative generation failed.";
           narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage };
           addLog(`[NARRATIVE_PLAN] ${narrativeText}`);
-          if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+          const networkTimeMs = durationMs;
+          const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+          console.log(`AI_NARRATIVE_PLAN: ${networkTimeStr}`);
+          if (tokenUsage) {
+              addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${networkTimeStr}`);
+          } else {
+              addLog(`AI_USAGE: ${networkTimeStr}`);
+          }
 
           // Parsing Narrative Milestones
           // Look for everything between [TIMELINE]: and the next section [SECTION] or end of string
@@ -1389,7 +1413,7 @@ ${objectivesContext}
       addLog(`AI_REQUEST: Generating intro for "${selectedPersona}"...`);
       addLog(`[DEBUG_INTRO_PROMPT] ${prompt}`); // Log to console
 
-      const response = await generateContentWithRetry(
+      const { response, durationMs } = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
           { maxOutputTokens: 1024 },
@@ -1400,7 +1424,14 @@ ${objectivesContext}
       const tokenUsage = extractUsage(response);
       const introText = response.text || "Session initialized. AetherAegis monitoring active.";
       addLog(`AI_INTRO: "${introText}"`);
-      if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+      const networkTimeMs = durationMs;
+      const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+      console.log(`AI_INTRO: ${networkTimeStr}`);
+      if (tokenUsage) {
+          addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${networkTimeStr}`);
+      } else {
+          addLog(`AI_USAGE: ${networkTimeStr}`);
+      }
       
       // Store in ref for file log
       sessionIntroRef.current = { prompt, text: introText, tokenUsage };
@@ -1504,7 +1535,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         addLog(`AI_REQUEST: Generating Final Session Report...`);
         addLog(`[DEBUG_FINAL_REPORT_PROMPT] ${prompt}`); 
         
-        const response = await generateContentWithRetry(
+        const { response, durationMs } = await generateContentWithRetry(
             'gemini-3-flash-preview',
             prompt,
             { maxOutputTokens: 1536 },
@@ -1516,12 +1547,19 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         const llmModel = 'gemini-3-flash-preview';
         const ttsModel = 'gemini-2.5-flash-preview-tts';
         const reportText = response.text || "Session concluded. Data saved.";
-        const fullReportText = `${reportText}\n\nLLM Model: ${llmModel}\nTTS Model: ${ttsModel}`;
+        const networkTimeMs = durationMs;
+        const networkTimeStr = `[Network Time: ${(networkTimeMs / 1000).toFixed(2)}s]`;
+        console.log(`AI_FINAL_REPORT: ${networkTimeStr}`);
+        const fullReportText = `${reportText}\n\nLLM Model: ${llmModel}\nTTS Model: ${ttsModel}\nReport Network Time: ${networkTimeStr}`;
         
         finalSessionReportRef.current = { prompt, text: fullReportText, tokenUsage };
         setFinalReportText(fullReportText); // Update State for UI
         addLog(`[FINAL_REPORT] ${reportText}`);
-        if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+        if (tokenUsage) {
+            addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${networkTimeStr}`);
+        } else {
+            addLog(`AI_USAGE: ${networkTimeStr}`);
+        }
 
         // Trigger TTS for final report if voice is enabled
         if (isVoiceEnabled) {
@@ -1677,7 +1715,7 @@ Active Time: ${activeTimeStr}
       addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
-      const response = await generateContentWithRetry(
+      const { response, durationMs } = await generateContentWithRetry(
           'gemini-3-flash-preview',
           prompt,
           { responseMimeType: 'application/json', maxOutputTokens: 600 },
@@ -1690,7 +1728,14 @@ Active Time: ${activeTimeStr}
       const cleanedRaw = cleanJSONResponse(insightRaw);
       addLog(`AI_RESPONSE: Analysis complete.`);
       addLog(`AI_INSIGHT_JSON: ${cleanedRaw}`);
-      if (tokenUsage) addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}]`);
+      const networkTimeMs = durationMs;
+      const networkTimeStr = `[Network Time: ${(networkTimeMs / 1000).toFixed(2)}s]`;
+      console.log(`AI_INSIGHT: ${networkTimeStr}`);
+      if (tokenUsage) {
+          addLog(`AI_USAGE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${networkTimeStr}`);
+      } else {
+          addLog(`AI_USAGE: ${networkTimeStr}`);
+      }
 
       let insightData: any;
       try {
