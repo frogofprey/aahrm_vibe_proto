@@ -1283,7 +1283,7 @@ ${sessionContext}${activityContext}
           addLog(`[DEBUG_NARRATIVE_PLAN_PROMPT] ${prompt}`);
 
           const { response, durationMs } = await generateContentWithRetry(
-              'gemini-3-flash-preview',
+              'gemini-3.1-flash-lite-preview',
               prompt,
               { maxOutputTokens: 1024 },
               2, // 2 retries
@@ -1414,7 +1414,7 @@ ${objectivesContext}
       addLog(`[DEBUG_INTRO_PROMPT] ${prompt}`); // Log to console
 
       const { response, durationMs } = await generateContentWithRetry(
-          'gemini-3-flash-preview',
+          'gemini-3.1-flash-lite-preview',
           prompt,
           { maxOutputTokens: 1024 },
           1, // 1 Retry
@@ -1536,7 +1536,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         addLog(`[DEBUG_FINAL_REPORT_PROMPT] ${prompt}`); 
         
         const { response, durationMs } = await generateContentWithRetry(
-            'gemini-3-flash-preview',
+            'gemini-3.1-flash-lite-preview',
             prompt,
             { maxOutputTokens: 1536 },
             1, // 1 Retry
@@ -1544,7 +1544,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         );
         
         const tokenUsage = extractUsage(response);
-        const llmModel = 'gemini-3-flash-preview';
+        const llmModel = 'gemini-3.1-flash-lite-preview';
         const ttsModel = 'gemini-2.5-flash-preview-tts';
         const reportText = response.text || "Session concluded. Data saved.";
         const networkTimeMs = durationMs;
@@ -1716,7 +1716,7 @@ Active Time: ${activeTimeStr}
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
       const { response, durationMs } = await generateContentWithRetry(
-          'gemini-3-flash-preview',
+          'gemini-3.1-flash-lite-preview',
           prompt,
           { responseMimeType: 'application/json', maxOutputTokens: 600 },
           1, // 1 Retry

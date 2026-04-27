@@ -75,7 +75,7 @@
         *   **State Awareness**: The `<objective_tracker>` must explicitly include the `[CURRENT SESSION STATE]`.
         *   **History Precision**: The `<short_term_context>` history must include the specific session state for each historical packet to aid the AI in understanding transitions. It maintains the last **3 minutes** of session data for continuity.
         *   **Live Telemetry**: Include the **Current BPM** at the time of trigger alongside minute metrics.
-*   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, Mission Profile, and **Narrative Plan**) to the **Google Gemini API** (`gemini-3-flash-preview`) to generate a concise, goal-oriented coaching insight.
+*   **AI Analysis**: Send the Minute Packet (plus History, Mid-Term Context, Mission Profile, and **Narrative Plan**) to the **Google Gemini API** (`gemini-3.1-flash-lite-preview`) to generate a concise, goal-oriented coaching insight.
     *   **Response Handling**: The system must use a robust JSON cleaner to strip Markdown formatting from AI responses and handle key variations (e.g., `saliency_score` vs `saliencyScore`).
     *   **Update Frequency**: Insights are requested every 60 seconds.
     *   **Active Time Reporting**:

@@ -7,7 +7,7 @@ This document outlines the specific lifecycle, timing, and data dependencies of 
 
 The application primarily utilizes two models via the Google GenAI SDK:
 
-1.  **Reasoning & Text Generation**: `gemini-3-flash-preview`
+1.  **Reasoning & Text Generation**: `gemini-3.1-flash-lite-preview`
     *   Chosen for low latency and high instruction-following capability.
     *   Used for all analytical, narrative, and summarization tasks.
 2.  **Audio Synthesis**: `gemini-2.5-flash-preview-tts`
