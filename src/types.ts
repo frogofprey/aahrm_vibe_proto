@@ -57,6 +57,7 @@ export interface MinuteSummary {
   ttsInstruction?: string;
   perceivedState?: string;
   rawJson?: string;
+  targetZoneInfo?: string;
 }
 
 export enum ConnectionStatus {
@@ -88,6 +89,9 @@ export interface TrainingObjective {
   targetZones: number[];
   mission: string;
   transitionStrategy: string;
+  warmupGoal: string;
+  mainGoal: string;
+  recoveryGoal: string;
 }
 
 export interface PersonaConfig {

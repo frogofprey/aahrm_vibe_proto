@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality } from "@google/genai";
-import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone } from './types';
+import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone, TrainingObjective } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
 import HeartRateChart from './components/HeartRateChart';
@@ -241,6 +241,7 @@ const App: React.FC = () => {
   
   // Session Metrics Refs
   const runningMetricsRef = useRef<{ heartPoints: number; calories: number; compliantMinutes: number; performanceMinutes: number }>({ heartPoints: 0, calories: 0, compliantMinutes: 0, performanceMinutes: 0 });
+  const processedObjectiveRef = useRef<TrainingObjective | null>(null);
   
   // Hysteresis Refs
   const transitionTimersRef = useRef<{ 
@@ -879,6 +880,7 @@ const App: React.FC = () => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        contentDebug += `   > TARGET HR  : ${s.targetZoneInfo || "N/A"}\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
@@ -1164,25 +1166,38 @@ const App: React.FC = () => {
     const buffMin = Math.round(targetMin - buffWidth);
     const buffMax = targetMax === Infinity ? mhr : Math.round(targetMax + buffWidth);
 
-    let profileText = currentObjective.mission
-      .replace(/{{MHR}}/g, mhr.toString())
-      .replace(/{{Z1_MIN}}/g, z1_min.toString())
-      .replace(/{{Z1_MAX}}/g, z1_max.toString())
-      .replace(/{{Z2_MIN}}/g, z2_min.toString())
-      .replace(/{{Z2_MAX}}/g, z2_max.toString())
-      .replace(/{{Z3_MIN}}/g, z3_min.toString())
-      .replace(/{{Z3_MAX}}/g, z3_max.toString())
-      .replace(/{{Z4_MIN}}/g, z4_min.toString())
-      .replace(/{{Z4_MAX}}/g, z4_max.toString())
-      .replace(/{{Z5_MIN}}/g, z5_min.toString())
-      .replace(/{{Z5_MAX}}/g, z5_max.toString())
-      .replace(/{{BUFF_WIDTH}}/g, buffWidth.toString())
-      .replace(/{{BUFF_MIN}}/g, buffMin.toString())
-      .replace(/{{BUFF_MAX}}/g, buffMax.toString())
-      .replace(/{{MIN_TIZ_MINS}}/g, minTizMins.toString())
-      .replace(/{{MAX_VAR_MINS}}/g, maxVarMins.toString())
-      .replace(/{{TIME}}/g, intervalTime.toString())
-      .replace(/{{COUNT}}/g, intervalCountGoal.toString());
+    const replaceTemplates = (text: string) => {
+      return text
+        .replace(/{{MHR}}/g, mhr.toString())
+        .replace(/{{Z1_MIN}}/g, z1_min.toString())
+        .replace(/{{Z1_MAX}}/g, z1_max.toString())
+        .replace(/{{Z2_MIN}}/g, z2_min.toString())
+        .replace(/{{Z2_MAX}}/g, z2_max.toString())
+        .replace(/{{Z3_MIN}}/g, z3_min.toString())
+        .replace(/{{Z3_MAX}}/g, z3_max.toString())
+        .replace(/{{Z4_MIN}}/g, z4_min.toString())
+        .replace(/{{Z4_MAX}}/g, z4_max.toString())
+        .replace(/{{Z5_MIN}}/g, z5_min.toString())
+        .replace(/{{Z5_MAX}}/g, z5_max.toString())
+        .replace(/{{BUFF_WIDTH}}/g, buffWidth.toString())
+        .replace(/{{BUFF_MIN}}/g, buffMin.toString())
+        .replace(/{{BUFF_MAX}}/g, buffMax.toString())
+        .replace(/{{MIN_TIZ_MINS}}/g, minTizMins.toString())
+        .replace(/{{MAX_VAR_MINS}}/g, maxVarMins.toString())
+        .replace(/{{TIME}}/g, intervalTime.toString())
+        .replace(/{{COUNT}}/g, intervalCountGoal.toString());
+    };
+
+    const profileText = replaceTemplates(currentObjective.mission);
+
+    // Also process the helper goal fields for logging/UI
+    processedObjectiveRef.current = {
+      ...currentObjective,
+      mission: profileText,
+      warmupGoal: replaceTemplates(currentObjective.warmupGoal || ""),
+      mainGoal: replaceTemplates(currentObjective.mainGoal || ""),
+      recoveryGoal: replaceTemplates(currentObjective.recoveryGoal || "")
+    };
 
     addLog(`SYSTEM: Mission Profile generated locally for "${currentObjective.title}"`);
     missionProfileRef.current = { prompt: "LOCAL_GENERATION", text: profileText, tokenUsage: undefined };
@@ -1943,14 +1958,38 @@ Active Time: ${activeTimeStr}
     runningMetricsRef.current.calories += calories;
     
     // Only increment Compliance Denominator if in active performance states
-    // we should only be tracking compliance time when we're in main_active and bonus_active states.
+    // For interval based objectives, time spent in the correct zone while in recovery phase should also count for compliance. 
     const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || 
-                               effectiveFrameState === SessionState.BONUS_ACTIVE;
+                               effectiveFrameState === SessionState.BONUS_ACTIVE ||
+                               (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY);
     
     if (isPerformanceState) {
         const minutesElapsed = values.length / 60;
         runningMetricsRef.current.performanceMinutes += minutesElapsed; // Increment denominator for active minutes
         if (isCompliant) runningMetricsRef.current.compliantMinutes += minutesElapsed;
+    }
+
+    // --- Target Zone Info for Logging ---
+    let targetZoneInfo = "N/A";
+    const po = processedObjectiveRef.current;
+    if (po) {
+        if (effectiveFrameState === SessionState.WARMUP) {
+            targetZoneInfo = `WARMUP: Target > ${po.warmupGoal} BPM`;
+        } else if (effectiveFrameState === SessionState.MAIN_ACTIVE || effectiveFrameState === SessionState.BONUS_ACTIVE) {
+            targetZoneInfo = `ACTIVE: Target ${po.mainGoal} BPM`;
+        } else if (effectiveFrameState === SessionState.RECOVERY) {
+            targetZoneInfo = `RECOVERY: Target ${po.recoveryGoal} BPM`;
+        } else if (effectiveFrameState === SessionState.PAUSE) {
+            targetZoneInfo = "PAUSE: No Target";
+        }
+    } else if (currentObjective.targetZones.length > 0) {
+        // Fallback to zone-based calculation if processedObjective isn't ready
+        const zoneLabels = currentObjective.targetZones.map(idx => {
+            const z = idx > 0 ? zones[idx - 1] : zones[0];
+            const maxLabel = z.max === Infinity ? "MAX" : Math.round(z.max);
+            return `Zone ${idx} (${Math.round(z.min)}-${maxLabel})`;
+        });
+        targetZoneInfo = zoneLabels.join(", ");
     }
 
     const newSummary: MinuteSummary = {
@@ -1964,7 +2003,8 @@ Active Time: ${activeTimeStr}
       isAnalyzing: true,
       heartPoints: points,
       calories: calories,
-      sessionState: effectiveFrameState // Use calculated frame state
+      sessionState: effectiveFrameState, // Use calculated frame state
+      targetZoneInfo
     };
 
     // Store in full session log history
@@ -1973,6 +2013,7 @@ Active Time: ${activeTimeStr}
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
     addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'} | Gated: ${!isPerformanceState}`);
+    console.log(`METRICS: Minute Packet [${timestamp}] | Target Zone: ${targetZoneInfo} | Compliant: ${isCompliant}`);
     addLog(`STATE_FRAME: ${effectiveFrameState} (Current: ${currentSessionState})`);
     
     // Trigger standard analysis

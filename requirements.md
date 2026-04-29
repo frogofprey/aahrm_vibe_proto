@@ -29,15 +29,16 @@
 *   **Workout Timer**: Allow the user to Start and Stop a workout session.
 *   **Duration Tracking**:
     *   **Wall Clock**: Display the total elapsed time of the session in `HH:MM:SS` format.
-    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP`, `PAUSE`, or `RECOVERY` must not count towards the Time Objective or Compliance denominator.
+    *   **Performance Duration**: Internally track time specifically spent in `MAIN_ACTIVE` or `BONUS_ACTIVE` states. This value is used for **Time Goal** progress and **Compliance** calculations. Time spent in `WARMUP` or `PAUSE` must not count towards the Time Objective or Compliance denominator. *For Interval Strategies, `RECOVERY` periods are included in Performance Duration as they are integral to the interval cycle.*
 *   **Metric Tracking**:
     *   **Heart Points**: Calculated every minute. +1 point for Zone 2 or 3. +2 points for Zone 4 or 5. *Accumulates during ALL states (including Warmup/Recovery).*
     *   **Calories Burned**: Calculated every minute using the Keytel Equation (Factors: HR, Age, Weight, Gender). *Accumulates during ALL states.*
-    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. Accuracy is ensured through majority-state identification, preventing fractional transition packets from polluting compliance data. Warmup and Recovery time are excluded from the denominator.
+    *   **Zone Compliance**: Calculated as `Minutes in Target Zone / Total Performance Minutes`. Accuracy is ensured through majority-state identification, preventing fractional transition packets from polluting compliance data. Warmup time is excluded from the denominator. Recovery time is included ONLY for Interval Strategies.
     *   **Gender Input**: Added selector (Male/Female) to support accurate calorie calculation.
 *   **Data Recording**: Data accumulation for "Minute Packets" must only occur while a session is active.
 *   **Mission Profile**: Upon session initialization, the system must generate a baseline "Mission Profile" based on Age, **Session Duration Goal**, and Training Goal (including **Interval Count** and **Interval Time** if applicable).
     *   This profile must explicitly calculate Max HR, Primary Zone, Recovery Ceiling, and Zone Ranges.
+    *   The Training Objective must include state-specific target goals (`warmupGoal`, `mainGoal`, `recoveryGoal`) that dynamically resolve based on the user's Biometric Map.
     *   The Mission Profile text must be appended to the user's goal in all subsequent periodic AI analysis calls.
 *   **Narrative Mission Plan**: Upon session initialization, the system must generate a "Narrative Mission Plan" using the selected Persona.
     *   **Persona Customization**: The generation prompt incorporates the persona's specific `missionProfile` instructions to tailor the story arc.
@@ -62,7 +63,7 @@
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
     *   **State Identification**:
         *   **Majority State**: The "State" of a minute packet is determined by the **majority state** observed during that 60-second window across all strategies. This ensures mathematically consistent labeling of transition packets and prevents "warmup bleed" into performance metrics.
-    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), Sample Count, Frame State, Raw value array.
+    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), **Target Zone Info**, Sample Count, Frame State, Raw value array.
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
     *   This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
