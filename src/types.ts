@@ -58,6 +58,9 @@ export interface MinuteSummary {
   perceivedState?: string;
   rawJson?: string;
   targetZoneInfo?: string;
+  coachingDirection?: string;
+  safetyAlert?: boolean;
+  milestoneLabel?: string;
 }
 
 export enum ConnectionStatus {

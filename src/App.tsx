@@ -237,6 +237,7 @@ const App: React.FC = () => {
   const lastPerformanceTickRef = useRef<number>(0);
   const pendingAiMarkerRef = useRef(false);
   const hasSentFirstMainActiveInsightRef = useRef(false);
+  const lastMilestoneCheckSecondRef = useRef<number>(-1);
   const workerRef = useRef<Worker | null>(null);
   
   // Session Metrics Refs
@@ -855,11 +856,15 @@ const App: React.FC = () => {
     }
 
     if (narrativeMilestonesRef.current && narrativeMilestonesRef.current.length > 0) {
-        contentDebug += `[PARSED NARRATIVE MILESTONES]\n`;
+        contentDebug += `[NARRATIVE MISSION PLAN READY | ${narrativeMilestonesRef.current.length} Milestones | Last Check Index: ${lastMilestoneCheckSecondRef.current}s]\n`;
         narrativeMilestonesRef.current.forEach(m => {
-            contentDebug += `  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}\n`;
+            contentDebug += `   - ${m.timeLabel} (${m.timeInSeconds}s) [${m.label}] || ${m.narrative}\n`;
         });
         contentDebug += `--------------------------------------------------\n\n`;
+    } else if (narrativeMissionPlanRef.current) {
+        contentDebug += `[NARRATIVE MISSION PLAN GENERATED BUT NO MILESTONES PARSED]\n--------------------------------------------------\n\n`;
+    } else {
+        contentDebug += `[NARRATIVE MISSION PLAN PENDING...]\n--------------------------------------------------\n\n`;
     }
 
     if (sessionIntroRef.current) {
@@ -879,8 +884,11 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
+        contentDebug += `   > ACTIVE TIME: ${Math.floor((s.id ? parseInt(s.id) * 60 : 0) / 60)}:00 (approx)\n`; // We don't store exact active time in summary yet
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
         contentDebug += `   > TARGET HR  : ${s.targetZoneInfo || "N/A"}\n`;
+        contentDebug += `   > DIRECTION  : ${s.coachingDirection || "Maintain"}${s.safetyAlert ? " [SAFETY ALERT!]" : ""}\n`;
+        contentDebug += `   > MILESTONE  : ${s.milestoneLabel && s.milestoneLabel !== "none" ? s.milestoneLabel : "none"}\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
@@ -1319,22 +1327,22 @@ ${sessionContext}${activityContext}
           }
 
           // Parsing Narrative Milestones
-          // Look for everything between [TIMELINE]: and the next section [SECTION] or end of string
-          const timelineRegex = /\[TIMELINE\]:([\s\S]*?)(?=\n\[|$)/i;
+          // Look for everything between [TIMELINE] and the next section header [ANY_HEADER] or end of string
+          const timelineRegex = /\[TIMELINE\]:?\s*([\s\S]*?)(?=\n\[|$)/i;
           const timelineMatch = narrativeText.match(timelineRegex);
           const rawTimeline = timelineMatch ? timelineMatch[1].trim() : "";
-          const lines = rawTimeline.split('\n').filter(l => l.trim() !== "");
+          const lines = rawTimeline.split('\n').map(l => l.trim()).filter(l => l !== "");
           
           const parsedMilestones: NarrativeMilestone[] = [];
           
           lines.forEach(line => {
-              // Regex for "M:SS [Label]: Narrative" or "HH:MM:SS [Label]: Narrative"
-              // Supporting flexible whitespace and formats
-              const lineMatch = line.match(/^\s*(\d+[:\d+]*)\s*\[(.*?)\]:\s*(.*)$/);
+              // Regex for "M:SS [Label] || Narrative" or "M:SS Label || Narrative"
+              // Supporting both bracketed and unbracketed labels, and multiple separators.
+              const lineMatch = line.match(/^(\d+[:\d+]*)\s*(?:\[(.*?)\]|([^:|]+?))\s*(?::|\|+)\s*(.*)$/);
               if (lineMatch) {
                   const timeLabel = lineMatch[1].trim();
-                  const label = lineMatch[2].trim();
-                  const narrative = lineMatch[3].trim();
+                  const label = (lineMatch[2] || lineMatch[3]).trim();
+                  const narrative = lineMatch[4].trim();
                   
                   // Convert timeLabel to seconds
                   const parts = timeLabel.split(':').map(Number);
@@ -1971,16 +1979,53 @@ Active Time: ${activeTimeStr}
 
     // --- Target Zone Info for Logging ---
     let targetZoneInfo = "N/A";
+    let coachingDirection = "Maintain";
+    const smoothedHR = values.length >= 5 
+        ? Math.round(values.slice(-5).reduce((a, b) => a + b, 0) / 5) 
+        : avgHr;
+    const safetyAlert = smoothedHR > (220 - age);
+
     const po = processedObjectiveRef.current;
     if (po) {
+        let tMin = 0;
+        let tMax = Infinity;
+
         if (effectiveFrameState === SessionState.WARMUP) {
             targetZoneInfo = `WARMUP: Target > ${po.warmupGoal} BPM`;
+            tMin = parseInt(po.warmupGoal) || 0;
+            tMax = Infinity;
         } else if (effectiveFrameState === SessionState.MAIN_ACTIVE || effectiveFrameState === SessionState.BONUS_ACTIVE) {
             targetZoneInfo = `ACTIVE: Target ${po.mainGoal} BPM`;
+            const parts = po.mainGoal.split('-').map(p => parseInt(p));
+            tMin = parts[0] || 0;
+            tMax = parts[1] || Infinity;
         } else if (effectiveFrameState === SessionState.RECOVERY) {
             targetZoneInfo = `RECOVERY: Target ${po.recoveryGoal} BPM`;
+            const parts = po.recoveryGoal.split('-').map(p => parseInt(p));
+            tMin = parts[0] || 0;
+            tMax = parts[1] || Infinity;
         } else if (effectiveFrameState === SessionState.PAUSE) {
             targetZoneInfo = "PAUSE: No Target";
+            tMin = 0;
+            tMax = Infinity;
+        }
+
+        // Apply Directional Logic
+        const buffWidth = 5; // Matches calculation in generateMissionProfile
+        if (effectiveFrameState !== SessionState.PAUSE) {
+            if (smoothedHR < tMin) {
+                const diff = tMin - smoothedHR;
+                if (diff > 15) coachingDirection = "Large Increase";
+                else if (diff > buffWidth) coachingDirection = "Increase";
+                else coachingDirection = "Slight Increase";
+            } else if (smoothedHR > tMax) {
+                const diff = smoothedHR - tMax;
+                if (diff > 15) coachingDirection = "Large Decrease";
+                else if (diff > buffWidth) coachingDirection = "Decrease";
+                else coachingDirection = "Slight Decrease";
+            } else {
+                coachingDirection = "Maintain";
+            }
         }
     } else if (currentObjective.targetZones.length > 0) {
         // Fallback to zone-based calculation if processedObjective isn't ready
@@ -1990,6 +2035,34 @@ Active Time: ${activeTimeStr}
             return `Zone ${idx} (${Math.round(z.min)}-${maxLabel})`;
         });
         targetZoneInfo = zoneLabels.join(", ");
+    }
+
+    // --- Narrative Milestone check ---
+    let milestoneLabel = "none";
+    const currentActiveSeconds = Math.round(activeDurationRef.current / 1000);
+    
+    // Find any milestone in the range [lastChecked + 1, currentActiveSeconds]
+    // If it's the very first check (lastChecked == -1), we must explicitly start from -1 
+    // but allow matching 0:00.
+    const startRange = lastMilestoneCheckSecondRef.current + 1;
+    
+    // Find matching milestones that haven't been logged yet
+    const relevantMilestones = narrativeMilestonesRef.current.filter(m => 
+        m.timeInSeconds >= startRange && m.timeInSeconds <= currentActiveSeconds
+    );
+
+    if (relevantMilestones.length > 0) {
+        // Collect the latest one for the label
+        const latest = relevantMilestones[relevantMilestones.length - 1];
+        milestoneLabel = latest.label;
+        lastMilestoneCheckSecondRef.current = Math.max(lastMilestoneCheckSecondRef.current, currentActiveSeconds);
+    } else if (lastMilestoneCheckSecondRef.current === -1 && currentActiveSeconds >= 0) {
+        // Fallback for immediate 0:00 check if the filter above missed it for some reason
+        const zeroStart = narrativeMilestonesRef.current.find(m => m.timeInSeconds === 0);
+        if (zeroStart) {
+            milestoneLabel = zeroStart.label;
+            lastMilestoneCheckSecondRef.current = 0;
+        }
     }
 
     const newSummary: MinuteSummary = {
@@ -2004,7 +2077,10 @@ Active Time: ${activeTimeStr}
       heartPoints: points,
       calories: calories,
       sessionState: effectiveFrameState, // Use calculated frame state
-      targetZoneInfo
+      targetZoneInfo,
+      coachingDirection,
+      safetyAlert,
+      milestoneLabel
     };
 
     // Store in full session log history
@@ -2275,6 +2351,7 @@ Active Time: ${activeTimeStr}
       hasSentFirstMainActiveInsightRef.current = false;
       lastUpdateWallTimeRef.current = now;
       nextActiveTargetRef.current = 60000;
+      lastMilestoneCheckSecondRef.current = -1;
       setIntroText(null);
       transitionTimersRef.current = { warmupToMain: null, bonusToRecovery: null, mainToPause: null, pauseToMain: null };
       

@@ -29,6 +29,7 @@ For each minute `N`:
 *   **Active Time**: Time spent in performance states (MM:SS).
 *   **State**: The dominant session state (e.g., `MAIN_ACTIVE`).
 *   **Biometrics**: Avg BPM, Max BPM, Min BPM, Sample Count.
+*   **Targets**: Target Zone Info, **Coaching Direction**, **Safety Flag**, **Milestone Event**.
 *   **Metrics**: Calories burned (minute), Heart Points earned (minute).
 *   **Context Memory**: The "Mid-Term Memory" context available to the AI at this moment (Text + Prompt + Tokens).
 *   **AI Analysis**:

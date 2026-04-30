@@ -63,7 +63,16 @@
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
     *   **State Identification**:
         *   **Majority State**: The "State" of a minute packet is determined by the **majority state** observed during that 60-second window across all strategies. This ensures mathematically consistent labeling of transition packets and prevents "warmup bleed" into performance metrics.
-    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), **Target Zone Info**, Sample Count, Frame State, Raw value array.
+    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), **Target Zone Info**, **Coaching Direction**, **Safety Flag**, **Milestone Event**, Sample Count, Frame State, Raw value array.
+    *   **Milestone Event Logic**: A milestone is logged in the minute packet if the user's **Active Time** (rounded seconds) matches the `timeInSeconds` of a milestone defined in the Narrative Mission Plan.
+    *   **Coaching Direction Logic**:
+        *   **Input**: Smoothed heart rate over the last 5 seconds of the minute packet.
+        *   **Target Comparison**:
+            *   **Maintain**: HR is within the specific `mainGoal` or `recoveryGoal` range.
+            *   **Slight Increase/Decrease**: HR is outside the target but within the `BUFF_WIDTH` (5 BPM).
+            *   **Increase/Decrease**: HR is more than `BUFF_WIDTH` away from target.
+            *   **Large Increase/Decrease**: HR is more than **15 BPM** away from target.
+    *   **Safety Flag**: Triggered if the 5-second smoothed heart rate exceeds the user's predicted Max HR (220 - Age).
 *   **Mid-Term Memory**: After the second periodic update, the system must generate a "Mid-Term Memory" summary of the session's trend so far.
     *   **Context Depth**: This summary must be **2-3 sentences long** to preserve context about zone adherence and effort consistency.
     *   This summary must be injected into the context of all subsequent AI analysis calls to ensure continuity.
