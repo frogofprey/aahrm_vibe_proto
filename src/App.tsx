@@ -238,6 +238,7 @@ const App: React.FC = () => {
   const pendingAiMarkerRef = useRef(false);
   const hasSentFirstMainActiveInsightRef = useRef(false);
   const lastMilestoneCheckSecondRef = useRef<number>(-1);
+  const consecutiveMaintainCountRef = useRef<number>(0);
   const workerRef = useRef<Worker | null>(null);
   
   // Session Metrics Refs
@@ -884,11 +885,18 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
-        contentDebug += `   > ACTIVE TIME: ${Math.floor((s.id ? parseInt(s.id) * 60 : 0) / 60)}:00 (approx)\n`; // We don't store exact active time in summary yet
+        const activeMM = Math.floor((s.activeTime || 0) / 60);
+        const activeSS = Math.floor((s.activeTime || 0) % 60);
+        contentDebug += `   > TIME       : Session ${Math.floor((index + 1))} min | Active ${activeMM}:${activeSS.toString().padStart(2, '0')}\n`;
+        
+        const displaySmoothed = (s.smoothedHR !== undefined && s.smoothedHR !== null) ? s.smoothedHR.toString() : "N/A";
+        
         contentDebug += `   > HEART RATE : Avg ${s.avg} | Max ${s.max} | Min ${s.min} (Samples: ${s.sampleCount})\n`;
+        contentDebug += `   > COACHING HR: ${displaySmoothed} BPM (Smoothed)\n`;
         contentDebug += `   > TARGET HR  : ${s.targetZoneInfo || "N/A"}\n`;
         contentDebug += `   > DIRECTION  : ${s.coachingDirection || "Maintain"}${s.safetyAlert ? " [SAFETY ALERT!]" : ""}\n`;
         contentDebug += `   > MILESTONE  : ${s.milestoneLabel && s.milestoneLabel !== "none" ? s.milestoneLabel : "none"}\n`;
+        contentDebug += `   > IMPORTANCE : ${s.importance || 0}/10\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
@@ -2041,28 +2049,59 @@ Active Time: ${activeTimeStr}
     let milestoneLabel = "none";
     const currentActiveSeconds = Math.round(activeDurationRef.current / 1000);
     
-    // Find any milestone in the range [lastChecked + 1, currentActiveSeconds]
-    // If it's the very first check (lastChecked == -1), we must explicitly start from -1 
-    // but allow matching 0:00.
-    const startRange = lastMilestoneCheckSecondRef.current + 1;
-    
-    // Find matching milestones that haven't been logged yet
-    const relevantMilestones = narrativeMilestonesRef.current.filter(m => 
-        m.timeInSeconds >= startRange && m.timeInSeconds <= currentActiveSeconds
-    );
+    // Milestones only fire if we have actually started active time. 
+    // We allow them even if the majority state of this packet was Warmup, 
+    // provided we crossed the 0:00 active time threshold during this window.
+    if (activeDurationRef.current >= 0 && hasStartedActiveRef.current) {
+        // Find any milestone in the range [lastChecked + 1, currentActiveSeconds]
+        const startRange = lastMilestoneCheckSecondRef.current + 1;
+        
+        const relevantMilestones = narrativeMilestonesRef.current.filter(m => 
+            m.timeInSeconds >= startRange && m.timeInSeconds <= currentActiveSeconds
+        );
 
-    if (relevantMilestones.length > 0) {
-        // Collect the latest one for the label
-        const latest = relevantMilestones[relevantMilestones.length - 1];
-        milestoneLabel = latest.label;
-        lastMilestoneCheckSecondRef.current = Math.max(lastMilestoneCheckSecondRef.current, currentActiveSeconds);
-    } else if (lastMilestoneCheckSecondRef.current === -1 && currentActiveSeconds >= 0) {
-        // Fallback for immediate 0:00 check if the filter above missed it for some reason
-        const zeroStart = narrativeMilestonesRef.current.find(m => m.timeInSeconds === 0);
-        if (zeroStart) {
-            milestoneLabel = zeroStart.label;
-            lastMilestoneCheckSecondRef.current = 0;
+        if (relevantMilestones.length > 0) {
+            const latest = relevantMilestones[relevantMilestones.length - 1];
+            milestoneLabel = latest.label;
+            lastMilestoneCheckSecondRef.current = Math.max(lastMilestoneCheckSecondRef.current, currentActiveSeconds);
+        } else if (lastMilestoneCheckSecondRef.current === -1 && currentActiveSeconds >= 0) {
+            const zeroStart = narrativeMilestonesRef.current.find(m => m.timeInSeconds === 0);
+            if (zeroStart) {
+                milestoneLabel = zeroStart.label;
+                lastMilestoneCheckSecondRef.current = 0;
+            }
         }
+    }
+
+    // --- Importance Calculation ---
+    let importance = 3;
+    if (coachingDirection === "Maintain") {
+        consecutiveMaintainCountRef.current++;
+        importance = Math.max(1, 3 - (consecutiveMaintainCountRef.current - 1));
+    } else {
+        // Reset counter for any non-maintain packet
+        consecutiveMaintainCountRef.current = 0;
+        if (coachingDirection.includes("Slight")) {
+            importance = 4;
+        } else {
+            importance = 5;
+        }
+    }
+
+    if (coachingDirection === "Decrease" || coachingDirection === "Large Decrease") {
+        importance = Math.max(importance, 7);
+    }
+
+    if (milestoneLabel !== "none") {
+        importance = Math.max(importance, 6);
+    }
+
+    if (safetyAlert && coachingDirection === "Large Decrease") {
+        importance = Math.max(importance, 9);
+    }
+
+    if (smoothedHR >= (220 - age)) {
+        importance = 10;
     }
 
     const newSummary: MinuteSummary = {
@@ -2080,7 +2119,11 @@ Active Time: ${activeTimeStr}
       targetZoneInfo,
       coachingDirection,
       safetyAlert,
-      milestoneLabel
+      milestoneLabel,
+      importance,
+      activeTime: currentActiveSeconds,
+      smoothedHR,
+      rawJson: JSON.stringify({ smoothedHR })
     };
 
     // Store in full session log history
@@ -2088,8 +2131,8 @@ Active Time: ${activeTimeStr}
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
     addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
-    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'} | Gated: ${!isPerformanceState}`);
-    console.log(`METRICS: Minute Packet [${timestamp}] | Target Zone: ${targetZoneInfo} | Compliant: ${isCompliant}`);
+    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'} | Importance: ${importance}/10`);
+    console.log(`METRICS: Minute Packet [${timestamp}] | HR: (Avg ${avgHr} / Smoothed ${smoothedHR}) | Target Zone: ${targetZoneInfo} | Coaching: ${coachingDirection} | Importance: ${importance}/10`);
     addLog(`STATE_FRAME: ${effectiveFrameState} (Current: ${currentSessionState})`);
     
     // Trigger standard analysis

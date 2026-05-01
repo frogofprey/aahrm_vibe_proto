@@ -63,8 +63,17 @@
 *   **Minute Packets**: Aggregate telemetry data into 60-second summaries.
     *   **State Identification**:
         *   **Majority State**: The "State" of a minute packet is determined by the **majority state** observed during that 60-second window across all strategies. This ensures mathematically consistent labeling of transition packets and prevents "warmup bleed" into performance metrics.
-    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Calories Burned** (Minute), **Heart Points** (Minute), **Target Zone Info**, **Coaching Direction**, **Safety Flag**, **Milestone Event**, Sample Count, Frame State, Raw value array.
-    *   **Milestone Event Logic**: A milestone is logged in the minute packet if the user's **Active Time** (rounded seconds) matches the `timeInSeconds` of a milestone defined in the Narrative Mission Plan.
+    *   **Packet Contents**: Average BPM, Max BPM, Min BPM, **Coaching HR** (Smoothed), **Calories Burned** (Minute), **Heart Points** (Minute), **Target Zone Info**, **Coaching Direction**, **Safety Flag**, **Milestone Event**, **Importance Score**, **Active Time**, Sample Count, Frame State, Raw value array.
+    *   **Importance Score Logic**:
+        *   **Range**: 1 (low) to 10 (critical).
+        *   **10**: Smoothed HR >= Max HR (220 - Age).
+        *   **9**: Safety Alert active AND coaching direction is "Large Decrease".
+        *   **7**: Coaching direction is "Decrease" or "Large Decrease".
+        *   **6**: Active narrative milestone detected for the packet (Only triggers outside of Warmup).
+        *   **5**: Coaching direction is a major correction (Increase/Large Increase).
+        *   **4**: Coaching direction is a minor correction (Slight Increase/Slight Decrease).
+        *   **3 -> 1**: Coaching direction is "Maintain". Score starts at 3 and decays by 1 for each consecutive "Maintain" packet (minimum 1).
+    *   **Milestone Event Logic**: A milestone is logged in the minute packet if the user's **Active Time** (rounded seconds) matches the `timeInSeconds` of a milestone defined in the Narrative Mission Plan. **Milestones fire as soon as Active Time starts, even if the majority of the packet is Warmup.**
     *   **Coaching Direction Logic**:
         *   **Input**: Smoothed heart rate over the last 5 seconds of the minute packet.
         *   **Target Comparison**:

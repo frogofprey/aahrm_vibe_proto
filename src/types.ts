@@ -61,6 +61,9 @@ export interface MinuteSummary {
   coachingDirection?: string;
   safetyAlert?: boolean;
   milestoneLabel?: string;
+  importance?: number;
+  activeTime?: number;
+  smoothedHR?: number;
 }
 
 export enum ConnectionStatus {
