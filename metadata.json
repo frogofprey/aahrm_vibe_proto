@@ -1,5 +1,6 @@
 {
-  "name": "aahrc Dashboard 0.85",
+  "name": "aahrc Dashboard 0.86",
   "description": "A high-fidelity, real-time heart rate monitoring dashboard with a dark AetherAegis aesthetic, featuring live WebSocket data streaming and scrolling biometric visualization.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }

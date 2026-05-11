@@ -10,7 +10,7 @@ Used to establish the story arc for the session. Structured using XML-like tags,
 - **General Instructions**: Role definition (expert author/narrative creator).
 - **Requirements**: 
     - Recontextualization of workout goals.
-    - Milestone definition (every 5 mins).
+    - Milestone definition (narrative events spaced throughout the session).
     - Mission Complete/Maguffin definition.
     - Bonus/Overtime context.
     - Structural matching (Intervals vs. Time).

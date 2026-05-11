@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
 import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone, TrainingObjective } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
@@ -122,7 +122,8 @@ const STORAGE_KEYS = {
   INTERVAL_COUNT_GOAL: 'aetheraegis_interval_count_goal',
   ACTIVITY_VERBALIZATION: 'aetheraegis_activity_verbalization',
   SELECTED_ACTIVITY: 'aetheraegis_selected_activity',
-  CUSTOM_ACTIVITY: 'aetheraegis_custom_activity'
+  CUSTOM_ACTIVITY: 'aetheraegis_custom_activity',
+  AI_MODEL: 'aetheraegis_ai_model'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -132,24 +133,19 @@ const HR_MAX_VALID = 220;
 
 const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 
-const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless critically necessary for safety (Score 7+). Instead, use qualitative descriptors appropriate for your personality and the mission.`;
+const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless the Safety flag is present. Instead, use qualitative descriptors appropriate for your personality and the mission.`;
+
+const MILESTONE_INSTRUCTION = `Milestones: The <milestone> block includes an important narrative update for this session and should be heavily incorporated into your response. The milestone should be extremely clear to the user and in character. Ensure milestone updates don't contradict coaching guidance. The primary function of the milestone is to provide the user an idea about where they are in their session with respect to time.`;
 
 const BASE_SYSTEM_INSTRUCTION = `
-You are an agent that provides feedback to a user doing an exercise using a specific, themed persona in order to make that feedback more entertaining. 
-Data Input: You will receive a <current_minute_packet> containing an array of raw BPM samples, an average, and a Max/Min.
-PII Isolation: Do not attempt to guess or reference the user's age or identity. Use the provided "Zone" context in <mission_profile> as the absolute truth for intensity.
-Signal Noise: Prioritize trends over individual samples.
+You are an agent that provides feedback and milestone based time cues to a user doing an exercise using a specific, themed persona in order to make that feedback more entertaining.
+Data Input: You will receive a <current_minute_packet> containing metrics about the user's effort, importance of the current update, and safety status.
 {{TELEMETRY_CONSTRAINT}}
-Anti-Repetition: Review <short_term_context> and <transition_history> before writing. Vary on three levels: (1) sentence structure — avoid defaulting to the same grammatical frame across consecutive responses; (2) metaphor clusters — retire any concept (not just term) used in the last 3 responses, even if expressed with different words; (3) catchphrases — signature tics defined in the persona profile are permitted; other repeated phrases should be used sparingly. Suspended for critical safety warnings (Score 7+).
-Corrections: the input telemetry in <current_minute_packet> will show you the users current heart rate and past trends. Provide the user instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace. Be very clear and highlight cases where the heart rate is above the specified threshold or maximum heart rate (MHR) Note that target heart rates may change depending on the state of the session. If the user is more than one zone away from the target, increase the urgency of the instruction. Avoid the term redline unless referring to MHR. 
-Milestones: Narrative Milestones are noted by a time tag and a narrative block (0:00 [Instance Loading]) followed by flavor text you can use to increase immersion in <mission_profile>. Use the active_time provided in <current_timers> to note when a narrative milestone is relevant to the current update. The milestone should only be noted when the current active_time exactly matches the time in the narrative block, but subsequent updates can still use it for flavor or immersion. The milestone should be clear to the user and in character. Do not attempt to create new milestones. HARD CONSTRAINT: Do NOT process milestones during warmup state. 
-Goal: The current state is shown in the <objective_tracker> block. Be sure to remark on state changes when appropriate. A good output should consist of a Pace Steering Message followed by a Milestone if the active_time matches the narrative milestone exactly. If both are relevant the Pace Steering Message should come first and be clear to the user and then be followed by a milestone update. If a milestone is relevant for this update, ensure that the nature of the milestone is made extremely clear to the user - use a separate sentence to enforce this if needed. Ensure that milestone updates don't contradict Pace Steering Message guidance.   
-Context Usage: You will receive an <objective_tracker> and <transition_history>. These are purely contextual inputs for your awareness. DO NOT recite these stats in your output. Use them only to calibrate your motivational tone (e.g., if behind, encourage; if ahead, praise).
-ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short an punchy. 
-Saliency Scoring: At the end of every analysis, provide a Saliency Score (1-10) based on the urgency or novelty of the data.
-1-3: Routine data, no significant change. The user is in the target zone and no corrections or mission milestones are relevant. 
-4-6: Notable trend shift or minor zone boundary approach. Any mission milestones should be rated a minimum of 6 in order to ensure that the user will hear them. User is under target zone and needs instruction to increase towards the target. Reserve score 6 for narrative only updates. 
-7-10: Critical breach or safety alert. The user is well over the target zone, the score should reach 10 if the user has exceeded his MHR for more than 10 seconds. 
+Anti-Repetition: Review <short_term_context> before writing. Vary on three levels: (1) sentence structure; (2) metaphor clusters; (3) catchphrases. Suspended when there is a Safety tag given in the <current_minute_packet>
+Corrections: the input telemetry in <current_minute_packet> will show you the users coaching direction and urgency. Provide instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace.
+{{MILESTONE_CONSTRAINT}}
+ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short and punchy.
+Return only the persona narration text. Do not use JSON or markdown.
 `;
 
 const App: React.FC = () => {
@@ -190,6 +186,7 @@ const App: React.FC = () => {
   const [isActivityVerbalizationEnabled, setIsActivityVerbalizationEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.ACTIVITY_VERBALIZATION) !== 'false');
   const [selectedActivity, setSelectedActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.SELECTED_ACTIVITY) || 'walking');
   const [customActivity, setCustomActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.CUSTOM_ACTIVITY) || '');
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.AI_MODEL) || 'gemma-4-26b-a4b-it');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -1026,9 +1023,20 @@ const App: React.FC = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const startTime = performance.now();
 
+      // Ensure thinking mode is off for models that support it
+      // Default to MINIMAL thinking level to minimize latency and meet user request
+      const configWithNoThinking = {
+          ...generationConfig,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
+      };
+
       while (true) {
           try {
-              const response = await ai.models.generateContent({ model, contents, ...generationConfig });
+              const response = await ai.models.generateContent({ 
+                  model, 
+                  contents, 
+                  config: configWithNoThinking 
+              });
               const durationMs = performance.now() - startTime;
               return { response, durationMs };
           } catch (e: any) {
@@ -1288,7 +1296,7 @@ You are an expert author/Narrative creator. Based on the following Mission Profi
 5. Ensure that you match the structure of the session. If the session is based on intervals, ensure that you capture each interval transition and try to theme each transition using the persona's instructions. Focus on the transitions. Note that the interval time provided will be for both interval and recovery as well (so a 3 minute interval time will produce a 6 minute cycle).  If the session is time based, try to create reasonable milestones based on the template. In both cases it may be necessary to adjust timing to match user parameters. Don't include milestones or sections for warmup as they will be handled outside of the mission script. 
 
 [CONSTRAINTS]
-Hard Constraint: Don't use markdown in the final output. 
+Hard Constraint: Don't use markdown or JSON in the final output. 
 
 [OUTPUT FORMAT]
 ${exampleFormat}
@@ -1314,7 +1322,7 @@ ${sessionContext}${activityContext}
           addLog(`[DEBUG_NARRATIVE_PLAN_PROMPT] ${prompt}`);
 
           const { response, durationMs } = await generateContentWithRetry(
-              'gemini-3.1-flash-lite-preview',
+              'gemini-3-flash-preview',
               prompt,
               { maxOutputTokens: 1024 },
               2, // 2 retries
@@ -1412,7 +1420,7 @@ ${sessionContext}${activityContext}
     const taskSection = `<task>
 [GENERAL INSTRUCTIONS]
 The user has just started a workout session. Generate an introduction to initiate the session.
-You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. 
+You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. If there is an antagonist, be sure to mention them by name. 
 
 [CONSTRAINTS]
 - Strictly adhere to persona. 
@@ -1445,7 +1453,7 @@ ${objectivesContext}
       addLog(`[DEBUG_INTRO_PROMPT] ${prompt}`); // Log to console
 
       const { response, durationMs } = await generateContentWithRetry(
-          'gemini-3.1-flash-lite-preview',
+          selectedModel,
           prompt,
           { maxOutputTokens: 1024 },
           1, // 1 Retry
@@ -1477,7 +1485,7 @@ ${objectivesContext}
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, selectedModel]);
 
   const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
     const summaries = allSessionSummariesRef.current;
@@ -1567,7 +1575,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         addLog(`[DEBUG_FINAL_REPORT_PROMPT] ${prompt}`); 
         
         const { response, durationMs } = await generateContentWithRetry(
-            'gemini-3.1-flash-lite-preview',
+            selectedModel,
             prompt,
             { maxOutputTokens: 1536 },
             1, // 1 Retry
@@ -1575,7 +1583,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         );
         
         const tokenUsage = extractUsage(response);
-        const llmModel = 'gemini-3.1-flash-lite-preview';
+        const llmModel = selectedModel;
         const ttsModel = 'gemini-2.5-flash-preview-tts';
         const reportText = response.text || "Session concluded. Data saved.";
         const networkTimeMs = durationMs;
@@ -1602,11 +1610,24 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal, selectedModel]);
 
-  const requestAiInsight = async (summary: MinuteSummary) => {
+  const requestAiInsight = useCallback(async (summary: MinuteSummary) => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const personaIdentity = personaConfig.systemInstruction;
+
+    // 0. Milestone Check (Conditional) - Needed for prompt instructions
+    let milestoneSection = "";
+    let milestoneInstruction = "";
+    if (summary.milestoneLabel && summary.milestoneLabel !== "none") {
+        const milestoneData = (narrativeMilestonesRef.current || []).find(m => m.label === summary.milestoneLabel);
+        if (milestoneData) {
+            milestoneSection = `<milestone>
+[${milestoneData.timeLabel}] ${milestoneData.label}: ${milestoneData.narrative}
+</milestone>`;
+            milestoneInstruction = MILESTONE_INSTRUCTION;
+        }
+    }
     
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
@@ -1618,26 +1639,18 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     // 1. Task Section (Static)
     const taskSection = `<task>
 [GENERAL INSTRUCTIONS]
-${BASE_SYSTEM_INSTRUCTION.replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)}
+${BASE_SYSTEM_INSTRUCTION
+    .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)
+    .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)}
 
 [OUTPUT FORMAT]
-Return the response as a JSON object with the following structure. Return raw JSON only. Do not wrap in markdowncode fences or backticks.
-{
-  "saliency_score": number,  
-  "milestone_tag_id": string, // relevant milestone/narrative beat tied to current output. if none, then return "none" only return the milestone name (the value in brackets) - '10:00 [Encounter Midpoint]: Boss at half health - stamina check'  should simply return "Encounter Midpoint"
-  "coaching_directive": string, // CRITICAL: one of the following: "MAINTAIN_PACE", "INCREASE_EFFORT", "DECREASE_EFFORT", "EMERGENCY_STOP", "PREPARE_TRANSITION"
-  "persona_narrative": string, // The flavor text, constrained by the persona element. Format as pure text; don't use additional whitespace for formatting. 
-  "tts_instruction": string, // Modification of provided Baseline TTS Instruction to direct output and enhance the TTS. never instruct the TTS to slow down
-  "perceived_state": string // Echo: "warmup", "main_active", "recovery" , "bonus_active" , "pause" , "error"
-}
+Return your response as plain text narration in the specified persona. Do not include any JSON, labels, or formatting characters.
 </task>`;
 
     // 2. Persona Section (Static)
     const personaSection = `<persona>
 Identity: ${personaIdentity}
 Brevity Driver: ${personaConfig.iterationBrevityDriver}
-Mission Weight: ${personaConfig.missionWeight} (0-1 scale of how heavily to incorporate narrative elements)
-Baseline TTS Instruction: ${personaConfig.ttsBaselineInstruction}
 </persona>`;
 
     // 3. Mission Profile Section (Static)
@@ -1654,36 +1667,17 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
     
     let historyContext = "";
     
-    if (currentIndex === 0) {
-        // Packet #1: History is just the intro
-        if (sessionIntroRef.current) {
-            historyContext = `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n`;
+    // Last 3 summaries (insights only)
+    const last3 = allSummaries.slice(Math.max(0, currentIndex - 3), currentIndex);
+    last3.forEach(s => {
+        if (s.insight) {
+            historyContext += `-${s.insight}\n`;
         }
-    } else if (currentIndex === 1) {
-        // Packet #2: History is Intro + Packet #1
-        if (sessionIntroRef.current) {
-            historyContext += `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
-        }
-        const prev = allSummaries[0];
-        historyContext += `[PREVIOUS UPDATE (Minute 1)]\nState: ${prev.sessionState}\nMetrics: Avg ${prev.avg}, Max ${prev.max}\nCoach Feedback: "${prev.insight || 'N/A'}"\nCoaching Directive: "${prev.coachingDirective || 'N/A'}"\n`;
-    } else if (currentIndex === 2) {
-        // Packet #3: History is Intro + Packet #1 + Packet #2
-        if (sessionIntroRef.current) {
-            historyContext += `[START OF SESSION]\nCoach Intro: "${sessionIntroRef.current.text}"\n\n`;
-        }
-        const prev1 = allSummaries[0];
-        const prev2 = allSummaries[1];
-        historyContext += `[MINUTE 1]\nState: ${prev1.sessionState}\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n\n`;
-        historyContext += `[MINUTE 2]\nState: ${prev2.sessionState}\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n`;
-    } else {
-        // Packet #4+: History is last 3 updates
-        const prev3 = allSummaries[currentIndex - 3];
-        const prev2 = allSummaries[currentIndex - 2];
-        const prev1 = allSummaries[currentIndex - 1];
-        
-        historyContext += `[3 MINUTES AGO]\nState: ${prev3.sessionState}\nMetrics: Avg ${prev3.avg}, Max ${prev3.max}\nCoach Feedback: "${prev3.insight || 'N/A'}"\nCoaching Directive: "${prev3.coachingDirective || 'N/A'}"\n\n`;
-        historyContext += `[2 MINUTES AGO]\nState: ${prev2.sessionState}\nMetrics: Avg ${prev2.avg}, Max ${prev2.max}\nCoach Feedback: "${prev2.insight || 'N/A'}"\nCoaching Directive: "${prev2.coachingDirective || 'N/A'}"\n\n`;
-        historyContext += `[1 MINUTE AGO]\nState: ${prev1.sessionState}\nMetrics: Avg ${prev1.avg}, Max ${prev1.max}\nCoach Feedback: "${prev1.insight || 'N/A'}"\nCoaching Directive: "${prev1.coachingDirective || 'N/A'}"\n`;
+    });
+
+    // Always include Intro for continuity
+    if (sessionIntroRef.current) {
+        historyContext += `-Intro: ${sessionIntroRef.current.text}`;
     }
     // --- HISTORY BUILDER END ---
 
@@ -1714,51 +1708,31 @@ ${historyContext || "No recent history available."}
 
     // 7. Current Minute Packet Section (Volatile)
     const currentMinutePacketSection = `<current_minute_packet>
-- Current BPM: ${currentHR}
-- Average BPM: ${summary.avg}
-- Max BPM: ${summary.max}
-- Min BPM: ${summary.min}
-- HR Trend (10s): ${hrTrend}
-- Calories Burned (Min): ${summary.calories.toFixed(1)}
-- Heart Points (Min): ${summary.heartPoints}
-- Sample Count: ${summary.sampleCount}
-- Raw Telemetry Stream: [${summary.values.join(', ')}]
+BPM: (cur/avg/max/min) ${summary.smoothedHR}/${summary.avg}/${summary.max}/${summary.min}
+Trend (10s): ${hrTrend}
+Coaching Direction: ${summary.coachingDirection}
+Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : ""}
 </current_minute_packet>`;
 
-    // 8. Current Timers Section (Volatile)
-    const wallTime = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    let activeTimeStr = formatMMSS(activeDurationRef.current);
-    if (summary.sessionState === SessionState.WARMUP || summary.sessionState === SessionState.INIT) {
-        activeTimeStr = 'WARMING UP';
-    }
-    if (hasStartedActiveRef.current && !hasSentFirstMainActiveInsightRef.current) {
-        activeTimeStr = '0:00';
-        hasSentFirstMainActiveInsightRef.current = true;
-    }
-    const currentTimersSection = `<current_timers>
-Wall Time: ${wallTime}
-Active Time: ${activeTimeStr}
-</current_timers>`;
-
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}\n\n${currentTimersSection}`;
+    // 8. Milestone Section (Conditional) - already prepared earlier
+    
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}${milestoneSection ? `\n\n${milestoneSection}` : ""}`;
 
     try {
-      addLog(`AI_REQUEST: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
+      addLog(`AI_REQUEST [${selectedModel}]: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
       const { response, durationMs } = await generateContentWithRetry(
-          'gemini-3.1-flash-lite-preview',
+          selectedModel,
           prompt,
-          { responseMimeType: 'application/json', maxOutputTokens: 600 },
+          { maxOutputTokens: 600 },
           1, // 1 Retry
           'AI_INSIGHT'
       );
 
       const tokenUsage = extractUsage(response);
-      const insightRaw = response.text || "{}";
-      const cleanedRaw = cleanJSONResponse(insightRaw);
+      const insight = response.text || "";
       addLog(`AI_RESPONSE: Analysis complete.`);
-      addLog(`AI_INSIGHT_JSON: ${cleanedRaw}`);
       const networkTimeMs = durationMs;
       const networkTimeStr = `[Network Time: ${(networkTimeMs / 1000).toFixed(2)}s]`;
       console.log(`AI_INSIGHT: ${networkTimeStr}`);
@@ -1768,106 +1742,36 @@ Active Time: ${activeTimeStr}
           addLog(`AI_USAGE: ${networkTimeStr}`);
       }
 
-      let insightData: any;
-      try {
-        insightData = JSON.parse(cleanedRaw);
-        // Handle case where LLM returns an array of objects
-        if (Array.isArray(insightData) && insightData.length > 0) {
-          insightData = insightData[0];
-        }
-        
-        // Robust field extraction
-        const getScore = (data: any) => {
-           if (typeof data.saliency_score === 'number') return data.saliency_score;
-           if (typeof data.salience_score === 'number') return data.salience_score;
-           if (typeof data.saliencyScore === 'number') return data.saliencyScore;
-           return 10; // Default to high score to ensure voicing if score is missing
-        };
-
-        const getNarrative = (data: any) => {
-           return data.persona_narrative || data.narrative || data.insight || data.message || cleanedRaw;
-        };
-
-        const getInstruction = (data: any) => {
-           return data.tts_instruction || data.ttsInstruction || data.voice_instruction || personaConfig.ttsBaselineInstruction;
-        };
-
-        const getMilestone = (data: any) => {
-           return data.milestone_tag_id || data.milestoneTagId || data.milestone || "none";
-        };
-
-        const getDirective = (data: any) => {
-           return data.coaching_directive || data.coachingDirective || data.directive || "MAINTAIN_PACE";
-        };
-
-        const getState = (data: any) => {
-           return data.perceived_state || data.perceivedState || data.state || (summary.sessionState || "unknown");
-        };
-
-        insightData = {
-          saliency_score: getScore(insightData),
-          milestone_tag_id: getMilestone(insightData),
-          coaching_directive: getDirective(insightData),
-          persona_narrative: getNarrative(insightData),
-          tts_instruction: getInstruction(insightData),
-          perceived_state: getState(insightData)
-        };
-      } catch (e) {
-        addLog(`AI_ERROR: JSON parse failed. Raw: ${insightRaw}`);
-        insightData = {
-          saliency_score: 10, 
-          milestone_tag_id: "none",
-          coaching_directive: "MAINTAIN_PACE",
-          persona_narrative: cleanedRaw, // Use cleanedRaw if parse fails to avoid markdown clutter
-          tts_instruction: personaConfig.ttsBaselineInstruction,
-          perceived_state: summary.sessionState || "unknown"
-        };
-      }
-
-      const insight = insightData.persona_narrative;
-
       // Update the log history ref with the new insight and prompt
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
-        allSessionSummariesRef.current[logIndex].saliencyScore = insightData.saliency_score;
-        allSessionSummariesRef.current[logIndex].milestoneTagId = insightData.milestone_tag_id;
-        allSessionSummariesRef.current[logIndex].coachingDirective = insightData.coaching_directive;
-        allSessionSummariesRef.current[logIndex].ttsInstruction = insightData.tts_instruction;
-        allSessionSummariesRef.current[logIndex].perceivedState = insightData.perceived_state;
-        allSessionSummariesRef.current[logIndex].rawJson = insightRaw;
-
-        allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage; // Store token usage
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
+        allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage;
       }
 
       setSummaries(prev => prev.map(s => 
         s.id === summary.id ? { 
             ...s, 
             insight, 
-            saliencyScore: insightData.saliency_score,
-            milestoneTagId: insightData.milestone_tag_id,
-            coachingDirective: insightData.coaching_directive,
-            ttsInstruction: insightData.tts_instruction,
-            perceivedState: insightData.perceived_state,
-            rawJson: insightRaw,
             isAnalyzing: false, 
             prompt, 
             tokenUsage 
         } : s
       ));
 
-      // Speak the narrative with the custom TTS instruction if it meets the chattiness threshold
-      if (insightData.saliency_score >= chattiness) {
-          speakInsight(insight, insightData.tts_instruction);
+      // Speak the narrative if it meets the importance threshold
+      const importance = summary.importance ?? 0;
+      if (importance >= chattiness) {
+          // Pre-pend baseline TTS instruction as requested
+          speakInsight(insight, personaConfig.ttsBaselineInstruction);
       } else {
-          addLog(`VOICE_SKIP: Insight Score (${insightData.saliency_score}) < Threshold (${chattiness}).`);
+          addLog(`VOICE_SKIP: Importance (${importance}) < Threshold (${chattiness}).`);
       }
       
-      // Update the user session log with relevant data (extracting from JSON to match old format)
-      const logEntry = `AI_INSIGHT: Minute ${summary.id}: [Score ${insightData.saliency_score}] ${insightData.persona_narrative}${insightData.milestone_tag_id !== 'none' ? ` [${insightData.milestone_tag_id}]` : ''}`;
-      addLog(logEntry);
+      // Update the user session log
+      addLog(`AI_INSIGHT: Minute ${summary.id}: [Imp ${importance}] ${insight}`);
     } catch (e) {
       addLog(`AI_ERROR: Failed. ${e instanceof Error ? e.message : 'Unknown error'}`);
       
@@ -1882,7 +1786,7 @@ Active Time: ${activeTimeStr}
         s.id === summary.id ? { ...s, insight: "Analysis failed.", isAnalyzing: false, prompt } : s
       ));
     }
-  };
+  }, [selectedPersona, selectedModel, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity, hrTrend, chattiness]);
 
   const calculateMinuteSummary = useCallback(() => {
     const values = [...currentMinuteRef.current];
@@ -2156,107 +2060,166 @@ Active Time: ${activeTimeStr}
     
     setStatus(ConnectionStatus.CONNECTING);
     setError(null);
-    addLog(`SYSTEM: Uplink initiated at ${wsUrl}`);
-    
-    try {
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+
+    const isLocal = wsUrl.includes('localhost') || 
+                   wsUrl.includes('127.0.0.1') || 
+                   wsUrl.includes('0.0.0.0') ||
+                   wsUrl.includes('::1') ||
+                   wsUrl.includes('192.168.') || 
+                   wsUrl.includes('10.') || 
+                   wsUrl.includes('172.') || 
+                   wsUrl.includes('.local');
+
+    if (showSystemLogs) {
+      addLog(`DEBUG: Local detection for ${wsUrl}: ${isLocal}`);
+    }
+
+    const startWs = () => {
+      addLog(`SYSTEM: Uplink initiated at ${wsUrl}`);
       
-      ws.onopen = () => {
-        const fullDeviceId = `connect:${deviceIdHex}`;
-        addLog(`SYSTEM: Handshake confirmed: ${fullDeviceId}`);
-        setStatus(ConnectionStatus.CONNECTED);
-        ws.send(fullDeviceId);
-      };
+      try {
+        const ws = new WebSocket(wsUrl);
+        wsRef.current = ws;
+        
+        ws.onopen = () => {
+          const fullDeviceId = `connect:${deviceIdHex}`;
+          addLog(`SYSTEM: Handshake confirmed: ${fullDeviceId}`);
+          setStatus(ConnectionStatus.CONNECTED);
+          ws.send(fullDeviceId);
+        };
 
-      ws.onmessage = (event) => {
-        const rawMsg = event.data.toString();
-        try {
-          const rawData = JSON.parse(rawMsg);
-          const rawHR = rawData.hr !== undefined ? rawData.hr : (rawData.data?.hr);
-          const numericHR = typeof rawHR === 'number' ? rawHR : Number(rawHR);
-          
-          if (!isNaN(numericHR) && numericHR >= HR_MIN_VALID && numericHR <= HR_MAX_VALID) {
+        ws.onmessage = (event) => {
+          const rawMsg = event.data.toString();
+          try {
+            const rawData = JSON.parse(rawMsg);
+            const rawHR = rawData.hr !== undefined ? rawData.hr : (rawData.data?.hr);
+            const numericHR = typeof rawHR === 'number' ? rawHR : Number(rawHR);
             
-            // Update State Machine continuously based on new data
-            if (updateStateRef.current) {
-                updateStateRef.current(numericHR);
+            if (!isNaN(numericHR) && numericHR >= HR_MIN_VALID && numericHR <= HR_MAX_VALID) {
+              
+              // Update State Machine continuously based on new data
+              if (updateStateRef.current) {
+                  updateStateRef.current(numericHR);
+              }
+
+              const newData: HeartRateData = {
+                hr: numericHR,
+                timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                isAiRequest: pendingAiMarkerRef.current
+              };
+              
+              if (pendingAiMarkerRef.current) {
+                  pendingAiMarkerRef.current = false;
+              }
+              
+              if (sessionActiveRef.current) {
+                  currentMinuteRef.current.push(numericHR);
+                  sessionStatesInFrameRef.current.add(currentSessionStateRef.current);
+                  const currentCount = stateSamplesInFrameRef.current.get(currentSessionStateRef.current) || 0;
+                  stateSamplesInFrameRef.current.set(currentSessionStateRef.current, currentCount + 1);
+              }
+
+              if (showRawTelemetryRef.current) {
+                addLog(`TELEMETRY: ${numericHR} BPM | RAW: ${rawMsg}`);
+              }
+              
+              setCurrentHR(numericHR);
+
+              // --- HR Trend Calculation ---
+              const nowMs = Date.now();
+              const smoothedHR = 0.7 * numericHR + 0.3 * (smoothedHRRef.current ?? numericHR);
+              smoothedHRRef.current = smoothedHR;
+              
+              hrHistoryRef.current.push({ hr: smoothedHR, timestamp: nowMs });
+              // Keep only last 10 seconds
+              hrHistoryRef.current = hrHistoryRef.current.filter(p => nowMs - p.timestamp <= 10000);
+              
+              if (hrHistoryRef.current.length > 1) {
+                  const oldest = hrHistoryRef.current[0];
+                  const newest = hrHistoryRef.current[hrHistoryRef.current.length - 1];
+                  const diff = newest.hr - oldest.hr;
+                  
+                  let trend = "Stable";
+                  if (diff > 10) trend = "Fast Increase";
+                  else if (diff > 4) trend = "Increase";
+                  else if (diff < -10) trend = "Fast Decrease";
+                  else if (diff < -4) trend = "Decrease";
+                  
+                  setHrTrend(trend);
+              }
+
+              setDataPoints((prev) => {
+                const updated = [...prev, newData];
+                return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
+              });
+
+            } else {
+              addLog(`UPLINK: ${rawMsg}`);
             }
-
-            const newData: HeartRateData = {
-              hr: numericHR,
-              timestamp: new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-              isAiRequest: pendingAiMarkerRef.current
-            };
-            
-            if (pendingAiMarkerRef.current) {
-                pendingAiMarkerRef.current = false;
-            }
-            
-            if (sessionActiveRef.current) {
-                currentMinuteRef.current.push(numericHR);
-                sessionStatesInFrameRef.current.add(currentSessionStateRef.current);
-                const currentCount = stateSamplesInFrameRef.current.get(currentSessionStateRef.current) || 0;
-                stateSamplesInFrameRef.current.set(currentSessionStateRef.current, currentCount + 1);
-            }
-
-            if (showRawTelemetryRef.current) {
-              addLog(`TELEMETRY: ${numericHR} BPM | RAW: ${rawMsg}`);
-            }
-            
-            setCurrentHR(numericHR);
-
-            // --- HR Trend Calculation ---
-            const nowMs = Date.now();
-            const smoothedHR = 0.7 * numericHR + 0.3 * (smoothedHRRef.current ?? numericHR);
-            smoothedHRRef.current = smoothedHR;
-            
-            hrHistoryRef.current.push({ hr: smoothedHR, timestamp: nowMs });
-            // Keep only last 10 seconds
-            hrHistoryRef.current = hrHistoryRef.current.filter(p => nowMs - p.timestamp <= 10000);
-            
-            if (hrHistoryRef.current.length > 1) {
-                const oldest = hrHistoryRef.current[0];
-                const newest = hrHistoryRef.current[hrHistoryRef.current.length - 1];
-                const diff = newest.hr - oldest.hr;
-                
-                let trend = "Stable";
-                if (diff > 10) trend = "Fast Increase";
-                else if (diff > 4) trend = "Increase";
-                else if (diff < -10) trend = "Fast Decrease";
-                else if (diff < -4) trend = "Decrease";
-                
-                setHrTrend(trend);
-            }
-
-            setDataPoints((prev) => {
-              const updated = [...prev, newData];
-              return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
-            });
-
-          } else {
+          } catch (e) {
             addLog(`UPLINK: ${rawMsg}`);
           }
-        } catch (e) {
-          addLog(`UPLINK: ${rawMsg}`);
-        }
-      };
+        };
 
-      ws.onclose = () => {
-        addLog(`SYSTEM: Connection severed.`);
-        setStatus(ConnectionStatus.DISCONNECTED);
-        // If connection dies, we might want to pause session or just leave it. 
-        // For now, we leave the session active in UI but it won't get data.
-      };
-      
-      ws.onerror = () => {
-        addLog(`ERROR: WebSocket transport failure.`);
+        ws.onclose = () => {
+          addLog(`SYSTEM: Connection severed.`);
+          setStatus(ConnectionStatus.DISCONNECTED);
+          // If connection dies, we might want to pause session or just leave it. 
+          // For now, we leave the session active in UI but it won't get data.
+        };
+        
+        ws.onerror = () => {
+          addLog(`ERROR: WebSocket transport failure.`);
+          setStatus(ConnectionStatus.ERROR);
+          setError(`Uplink failure at ${wsUrl}`);
+        };
+      } catch (e) {
         setStatus(ConnectionStatus.ERROR);
-        setError(`Uplink failure at ${wsUrl}`);
-      };
-    } catch (e) {
-      setStatus(ConnectionStatus.ERROR);
-      setError('Initialization error.');
+        setError('Initialization error.');
+      }
+    };
+
+    if (isLocal && (navigator as any)?.permissions?.query) {
+      if (showSystemLogs) {
+        addLog("DEBUG: Initiating navigator.permissions.query for 'local-network-access'...");
+      }
+      try {
+        const pQuery = (navigator as any).permissions.query({ name: "local-network-access" });
+        
+        if (!pQuery || typeof pQuery.then !== 'function') {
+          if (showSystemLogs) addLog("DEBUG: permissions.query did not return a valid promise.");
+          startWs();
+          return;
+        }
+
+        pQuery.then((result: any) => {
+          if (showSystemLogs) {
+            addLog(`DEBUG: Permission query resolved. State: ${result.state}`);
+          }
+          if (result.state === "granted") {
+            addLog("SYSTEM: Local network access allowed; open WebSocket");
+          } else if (result.state === "prompt") {
+            addLog("SYSTEM: Requesting local network permission...");
+          }
+          startWs();
+        })
+        .catch((e: any) => {
+          if (showSystemLogs) {
+            addLog(`DEBUG: Permission query promise rejected: ${e.message || e}`);
+          }
+          startWs();
+        });
+      } catch (err: any) {
+        if (showSystemLogs) {
+          addLog(`DEBUG: Permission query threw synchronously: ${err.message || err}`);
+        }
+        startWs();
+      }
+    } else {
+      if (isLocal && showSystemLogs && !((navigator as any)?.permissions?.query)) {
+        addLog("DEBUG: Browser does not support navigator.permissions.query; skipping check.");
+      }
+      startWs();
     }
   }, [addLog, wsUrl, deviceIdHex]);
 
@@ -2280,6 +2243,7 @@ Active Time: ${activeTimeStr}
     localStorage.setItem(STORAGE_KEYS.ACTIVITY_VERBALIZATION, String(isActivityVerbalizationEnabled));
     localStorage.setItem(STORAGE_KEYS.SELECTED_ACTIVITY, selectedActivity);
     localStorage.setItem(STORAGE_KEYS.CUSTOM_ACTIVITY, customActivity);
+    localStorage.setItem(STORAGE_KEYS.AI_MODEL, selectedModel);
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -2323,9 +2287,10 @@ Active Time: ${activeTimeStr}
     hasStartedActiveRef.current = false;
     hasSentFirstMainActiveInsightRef.current = false;
     lastUpdateWallTimeRef.current = 0;
+    lastMilestoneCheckSecondRef.current = -1;
     nextActiveTargetRef.current = 60000;
     setTimeout(connect, 300);
-  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity]);
+  }, [connect, addLog, wsUrl, deviceIdHex, age, weight, gender, trainingGoal, sessionDurationGoal, isVoiceEnabled, selectedPersona, chattiness, showSystemLogs, showUserLogs, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity, selectedModel]);
 
   useEffect(() => {
     connect();
@@ -2520,6 +2485,16 @@ Active Time: ${activeTimeStr}
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Personality</label>
                 <select value={selectedPersona} onChange={(e) => setSelectedPersona(e.target.value)} className="bg-black border border-white/10 text-amber-500 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/50 transition-colors appearance-none cursor-pointer w-32">
                   {Object.keys(PERSONA_CONFIG).map(k => <option key={k} value={k}>{k}</option>)}
+                </select>
+              </div>
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">AI Model</label>
+                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors appearance-none cursor-pointer w-48">
+                  <option value="gemma-4-26b-a4b-it">Gemma 4 26b a4b it</option>
+                  <option value="gemma-4-31b-it">Gemma 4 31b it</option>
+                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+                  <option value="gemini-3.1-flash">Gemini 3.1 Flash</option>
                 </select>
               </div>
 

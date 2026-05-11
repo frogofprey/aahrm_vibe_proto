@@ -7,10 +7,12 @@ This document outlines the specific lifecycle, timing, and data dependencies of 
 
 The application primarily utilizes two models via the Google GenAI SDK:
 
-1.  **Reasoning & Text Generation**: `gemini-3.1-flash-lite-preview`
+1.  **Reasoning & Text Generation**: `gemma-4-31b-it`
     *   Chosen for low latency and high instruction-following capability.
-    *   Used for all analytical, narrative, and summarization tasks.
-2.  **Audio Synthesis**: `gemini-2.5-flash-preview-tts`
+    *   Used for analytical, periodic coaching, and summarization tasks.
+2.  **Narrative & Story Generation**: `gemini-3-flash-preview`
+    *   Used for the *Narrative Mission Plan* generation.
+3.  **Audio Synthesis**: `gemini-2.5-flash-preview-tts`
     *   Used for transforming AI text outputs into persona-specific audio.
 
 ---
@@ -68,14 +70,14 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Dependencies**: Requires at least 1 minute of telemetry.
 *   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<mission_profile>`, `<objective_tracker>`, `<transition_history>`, `<short_term_context>`, `<current_minute_packet>`, `<current_timers>`), ordered from static to volatile data.
 *   **Context/Input**:
-    *   **Persona**: Tailored system instruction (includes Mission Weight).
+    *   **Persona**: Tailored system instruction.
     *   **Goal Context**: User Goal, Mission Profile, Narrative Mission Plan.
     *   **Telemetry Abstraction Instruction** (Conditional).
     *   **Activity Context** (Conditional).
     *   **Transition History**: Log of all state changes within the session.
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
-    *   **Current Packet**: Raw telemetry array, Avg/Max/Min HR, HR Trend, Calories, Heart Points, Current Timers (Active Time).
+    *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction, Importance, Safety Flag.
 *   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (600 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
 
