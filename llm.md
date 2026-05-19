@@ -11,6 +11,11 @@ The application allows users to select their preferred model via a pulldown in t
 2.  **Gemma 4 31b it**
 3.  **Gemini 3.1 Flash Lite**
 4.  **Gemini 3.1 Flash**
+5.  **Gemma 4 e2b (Local)** - Connects to local Ollama model `gemma4:e2b` at `http://localhost:11434`
+6.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
+
+**Local Ollama Integration**:
+When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps `gemma-4-e2b` to `gemma4:e2b` and `gemma-4-e4b` to `gemma4:latest`. This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions.
 
 **Key Parameters**:
 *   **Thinking Level**: All models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses.

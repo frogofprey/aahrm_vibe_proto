@@ -50,6 +50,8 @@ Settings are organized into functional groups, easily accessible via a unified *
     *   `Gemma 4 31b it`
     *   `Gemini 3.1 Flash Lite`
     *   `Gemini 3.1 Flash`
+    *   `Gemma 4 e2b (Local)` (Workstation Ollama offline engine)
+    *   `Gemma 4 e4b (Local)` (Workstation Ollama offline engine)
 *   **Chattiness Level Slider**: Controls AI frequency and narrative length (Low, Medium, High).
 *   **Voice Toggle**: Enable/disable Gemini TTS engine speech output directly.
 

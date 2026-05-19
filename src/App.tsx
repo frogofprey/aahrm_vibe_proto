@@ -124,7 +124,8 @@ const STORAGE_KEYS = {
   ACTIVITY_VERBALIZATION: 'aetheraegis_activity_verbalization',
   SELECTED_ACTIVITY: 'aetheraegis_selected_activity',
   CUSTOM_ACTIVITY: 'aetheraegis_custom_activity',
-  AI_MODEL: 'aetheraegis_ai_model'
+  AI_MODEL: 'aetheraegis_ai_model',
+  OLLAMA_URL: 'aetheraegis_local_ollama_url'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -188,6 +189,7 @@ const App: React.FC = () => {
   const [selectedActivity, setSelectedActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.SELECTED_ACTIVITY) || 'walking');
   const [customActivity, setCustomActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.CUSTOM_ACTIVITY) || '');
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.AI_MODEL) || 'gemma-4-26b-a4b-it');
+  const [localOllamaUrl, setLocalOllamaUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.OLLAMA_URL) || 'http://localhost:11434');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -942,7 +944,7 @@ const App: React.FC = () => {
             contentUser += `Minute ${index + 1} (${s.timestamp}): Avg ${s.avg} BPM | Max ${s.max} BPM\n`;
             contentUser += `Metrics: ${s.calories.toFixed(1)} kcal, ${s.heartPoints} HP\n`;
             contentUser += `State: ${s.sessionState}\n`;
-            contentUser += `Saliency Score: ${s.saliencyScore ?? "N/A"} | Coaching: ${s.coachingDirective || "N/A"}\n`;
+            contentUser += `Importance Score: ${s.importance ?? "N/A"} | Coaching Direction: ${s.coachingDirection || "N/A"}\n`;
             contentUser += `Coach: "${s.insight || "N/A"}"\n\n`;
         });
     }
@@ -1021,8 +1023,67 @@ const App: React.FC = () => {
   // --- AI Call Retry Helper ---
   const generateContentWithRetry = useCallback(async (model: string, contents: any, generationConfig: any, maxRetries: number, logPrefix: string) => {
       let attempt = 0;
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const startTime = performance.now();
+
+      // Check if it's a local Ollama model
+      const isLocalModel = model === 'gemma-4-e2b' || model === 'gemma-4-e4b';
+
+      if (isLocalModel) {
+          const baseUrl = localOllamaUrl.trim().replace(/\/+$/, '') || 'http://localhost:11434';
+          const localUrl = `${baseUrl}/api/generate`;
+          const ollamaModelName = model === 'gemma-4-e2b' ? 'gemma4:e2b' : 'gemma4:latest';
+          addLog(`${logPrefix}: Routing to local Ollama [${ollamaModelName}] at ${localUrl}...`);
+          try {
+              const res = await fetch(localUrl, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                      model: ollamaModelName,
+                      prompt: typeof contents === 'string' ? contents : JSON.stringify(contents),
+                      stream: false,
+                      options: {
+                          num_predict: generationConfig?.maxOutputTokens || 1024
+                      }
+                  })
+              });
+
+              if (!res.ok) {
+                  const errText = await res.text();
+                  throw new Error(`Ollama status ${res.status}: ${errText}`);
+              }
+
+              const data = await res.json();
+              
+              // Suppress context parameter as requested
+              const copyData = { ...data };
+              delete copyData.context;
+
+              addLog(`LOCAL_AI_RESPONSE [Ollama - ${ollamaModelName}]: Raw Full Response JSON (excluding context):\n${JSON.stringify(copyData, null, 2)}`);
+              const response = {
+                  text: data.response || '',
+                  rawJson: JSON.stringify(copyData),
+                  usageMetadata: {
+                      promptTokenCount: data.prompt_eval_count || 0,
+                      candidatesTokenCount: data.eval_count || 0,
+                      totalTokenCount: (data.prompt_eval_count || 0) + (data.eval_count || 0)
+                  }
+              };
+              const durationMs = performance.now() - startTime;
+              return { response, durationMs };
+          } catch (e: any) {
+              addLog(`LOCAL_AI_ERROR: Failed to fetch local Ollama model "${ollamaModelName}" at "${localUrl}".`);
+              addLog(`Troubleshooting tips for dynamic browser-based local LLMs:`);
+              addLog(`1. Browser Mixed Content Block: Secure context (HTTPS) blocks fetching insecure (HTTP) local APIs directly. To fix, use an HTTPS secure tunnel (e.g., run 'ngrok http 11434' or 'cloudflared') and paste your custom secure HTTPS URL in the input bar.`);
+              addLog(`2. CORS Policy: Ensure your Ollama environment variables include 'OLLAMA_ORIGINS="*"' before starting Ollama.`);
+              addLog(`3. Is Ollama running?: Verify with 'curl ${baseUrl}' or postman.`);
+              addLog(`Error Source: ${e.message || e}`);
+              throw e;
+          }
+      }
+
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
       // Ensure thinking mode is off for models that support it
       // Default to MINIMAL thinking level to minimize latency and meet user request
@@ -1054,10 +1115,15 @@ const App: React.FC = () => {
               await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
           }
       }
-  }, [addLog]);
+  }, [addLog, localOllamaUrl]);
 
   const speakInsight = useCallback(async (text: string, customTtsInstruction?: string) => {
     if (!isVoiceEnabled) return;
+    
+    if (!text || !text.trim()) {
+      addLog(`VOICE_FILTER: Speech text is blank or empty. Skipping TTS synthesis.`);
+      return;
+    }
     
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
     const voiceName = personaConfig.voiceName;
@@ -1306,11 +1372,11 @@ ${sessionContext}${activityContext}
           const timelineRegex = /\[TIMELINE\]:?\s*([\s\S]*?)(?=\n\[|$)/i;
           const timelineMatch = narrativeText.match(timelineRegex);
           const rawTimeline = timelineMatch ? timelineMatch[1].trim() : "";
-          const lines = rawTimeline.split('\n').map(l => l.trim()).filter(l => l !== "");
+          const lines = rawTimeline.split('\n').map((l: string) => l.trim()).filter((l: string) => l !== "");
           
           const parsedMilestones: NarrativeMilestone[] = [];
           
-          lines.forEach(line => {
+          lines.forEach((line: string) => {
               // Regex for "M:SS [Label] || Narrative" or "M:SS Label || Narrative"
               // Supporting both bracketed and unbracketed labels, and multiple separators.
               const lineMatch = line.match(/^(\d+[:\d+]*)\s*(?:\[(.*?)\]|([^:|]+?))\s*(?::|\|+)\s*(.*)$/);
@@ -1726,6 +1792,9 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
         allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage;
+        if ((response as any).rawJson) {
+            allSessionSummariesRef.current[logIndex].rawJson = (response as any).rawJson;
+        }
       }
 
       setSummaries(prev => prev.map(s => 
@@ -1734,7 +1803,8 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
             insight, 
             isAnalyzing: false, 
             prompt, 
-            tokenUsage 
+            tokenUsage,
+            ...((response as any).rawJson ? { rawJson: (response as any).rawJson } : {})
         } : s
       ));
 
@@ -2467,12 +2537,29 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
 
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">AI Model</label>
-                <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors appearance-none cursor-pointer w-48">
-                  <option value="gemma-4-26b-a4b-it">Gemma 4 26b a4b it</option>
-                  <option value="gemma-4-31b-it">Gemma 4 31b it</option>
-                  <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-                  <option value="gemini-3.1-flash">Gemini 3.1 Flash</option>
-                </select>
+                <div className="flex gap-2 items-center">
+                  <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors appearance-none cursor-pointer w-48">
+                    <option value="gemma-4-26b-a4b-it">Gemma 4 26b a4b it</option>
+                    <option value="gemma-4-31b-it">Gemma 4 31b it</option>
+                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
+                    <option value="gemini-3.1-flash">Gemini 3.1 Flash</option>
+                    <option value="gemma-4-e2b">Gemma 4 e2b (Local)</option>
+                    <option value="gemma-4-e4b">Gemma 4 e4b (Local)</option>
+                  </select>
+                  {(selectedModel === 'gemma-4-e2b' || selectedModel === 'gemma-4-e4b') && (
+                    <input
+                      type="text"
+                      value={localOllamaUrl}
+                      onChange={(e) => {
+                        setLocalOllamaUrl(e.target.value);
+                        localStorage.setItem(STORAGE_KEYS.OLLAMA_URL, e.target.value);
+                      }}
+                      placeholder="http://localhost:11434"
+                      className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors w-40"
+                      title="Ollama Base URL (e.g., http://localhost:11434 or Ngrok tunnel)"
+                    />
+                  )}
+                </div>
               </div>
 
               <div className="h-10 w-px bg-white/5 hidden md:block" />

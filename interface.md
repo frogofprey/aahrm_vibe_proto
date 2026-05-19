@@ -67,7 +67,7 @@ The default screen uses a multi-faceted **Bento Grid** designed to fill a standa
     *   `Age` Input: Numeric value (range: 10-120), triggers zone recomputation instantly.
     *   `Weight` Input: Numeric decimal, drives metabolic calorie burn calculations.
     *   `Gender` Selector: Dropdown setting modifiers for basal profiles.
-    *   `Model` Selector: Dropdown containing available models (`Gemma 4 26b`, `Gemma 4 31b`, `Gemini 3.1 Flash Lite`, `Gemini 3.1 Flash`).
+    *   `Model` Selector: Dropdown containing available models (`Gemma 4 26b`, `Gemma 4 31b`, `Gemini 3.1 Flash Lite`, `Gemini 3.1 Flash`, plus local Ollama `Gemma 4 e2b` and `Gemma 4 e4b`).
     *   `Objective` Configurator: Handles training strategy target goals, duration limits, and interval counts.
     *   `Uplink Simulator Toggle`: Injects telemetry data packet sequences when a live heart rate sensor is absent.
 
