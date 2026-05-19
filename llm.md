@@ -5,15 +5,17 @@ This document outlines the specific lifecycle, timing, and data dependencies of 
 
 ## Model Configuration
 
-The application primarily utilizes two models via the Google GenAI SDK:
+The application allows users to select their preferred model via a pulldown in the dashboard. For all analytical and periodic calls (except the initial mission generation), the user can choose between:
 
-1.  **Reasoning & Text Generation**: `gemma-4-31b-it`
-    *   Chosen for low latency and high instruction-following capability.
-    *   Used for analytical, periodic coaching, and summarization tasks.
-2.  **Narrative & Story Generation**: `gemini-3-flash-preview`
-    *   Used for the *Narrative Mission Plan* generation.
-3.  **Audio Synthesis**: `gemini-2.5-flash-preview-tts`
-    *   Used for transforming AI text outputs into persona-specific audio.
+1.  **Gemma 4 26b a4b it** (Default)
+2.  **Gemma 4 31b it**
+3.  **Gemini 3.1 Flash Lite**
+4.  **Gemini 3.1 Flash**
+
+**Key Parameters**:
+*   **Thinking Level**: All models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses.
+*   **Mission Generation**: Now utilizes the **selected user model** (defaulting to Gemma 4 26b) for narrative planning, ensuring consistency across all session calls.
+*   **Audio Synthesis**: Uses `gemini-2.5-flash-preview-tts` for voice output.
 
 ---
 
@@ -33,15 +35,18 @@ These calls occur immediately after the user clicks **"START SESSION"**.
 *   **Output**: A structured text block defining Zone ranges and Phase protocols (e.g., "PRIMARY DIRECTIVE", "PHASE PROTOCOLS").
 
 ### B. Narrative Mission Plan
-*   **Trigger**: Automatically called **after** the *Mission Profile* is successfully generated.
-*   **Purpose**: Wraps the biometric data in a fictional layer based on the selected Persona.
-*   **Dependencies**: Requires output from *Mission Profile*.
+*   **Trigger**: Automatically called after the Mission Profile is successfully generated.
+*   **Purpose**: Programmatically generates a base template (via `generateMissionPlanTemplate`) and then uses AI to fill it with narrative flavor (thematic interpretation).
+*   **Logic**: Calculates precise timestamps for intervals or milestones based on the strategy. The LLM's role is strictly to recontextualize these technical milestones into the persona's thematic world.
+*   **Dependencies**: Requires session parameters (duration, interval count/time).
 *   **Context/Input**: 
     *   Selected Persona (System Instruction & Mission Profile).
-    *   Mission Profile text.
+    *   Programmatically generated template (the `OUTPUT FORMAT` structure).
     *   Session Context (Duration or Interval structure).
     *   Activity Context (Conditional).
-*   **Implementation**: LLM call with a **Structured Output Template** and few-shot examples (e.g., "Operation Laser-Pointer") to ensure consistent formatting. Includes a **Hard Constraint** to not use markdown in the final output. Includes a 1,024 `maxOutputTokens` constraint in `generationConfig`.
+*   **Implementation**: LLM call (selected user model) with a **Strict Structured Template**. 
+    *   **Hard Constraints**: Match the provided structure exactly, preserve all `M:SS` timestamps, and only replace bracketed placeholders with "flavor" text.
+    *   **Tone**: Use a neutral, cinematic, third-person "Dungeon Master" voice (not first-person persona roleplay).
 *   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[BONUS]`).
 
 ### C. Session Intro
@@ -125,17 +130,17 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
 sequenceDiagram
     participant User
     participant App
-    participant Flash as Gemini 3 Flash
+    participant AI as Selected LLM (Flash/Gemma)
     participant TTS as Gemini 2.5 TTS
 
     Note over User, App: 1. INITIALIZATION
     User->>App: Click "Start Session"
     activate App
     App->>App: Generate Mission Profile (Local Template)
-    App->>Flash: Generate Narrative Plan (uses Profile & Template)
-    Flash-->>App: Narrative Context
-    App->>Flash: Generate Session Intro
-    Flash-->>App: Intro Text
+    App->>AI: Generate Narrative Plan (uses Profile & Template)
+    AI-->>App: Narrative Context
+    App->>AI: Generate Session Intro
+    AI-->>App: Intro Text
     par TTS
         App->>TTS: Synthesize Intro
         TTS-->>App: Audio Buffer
@@ -148,8 +153,8 @@ sequenceDiagram
     loop Active Session
         App->>App: Aggregate Minute Telemetry
         activate App
-        App->>Flash: Request Minute Insight (w/ History & Context)
-        Flash-->>App: JSON (Insight + Score + Directive)
+        App->>AI: Request Minute Insight (w/ History & Context)
+        AI-->>App: JSON (Insight + Score + Directive)
         
         alt saliency_score >= Voice Threshold
             App->>TTS: Synthesize persona_narrative
@@ -161,8 +166,8 @@ sequenceDiagram
     Note over User, App: 3. CONCLUSION
     User->>App: Click "Stop Session"
     activate App
-    App->>Flash: Generate Final Report (Stats + History)
-    Flash-->>App: Report Text
+    App->>AI: Generate Final Report (Stats + History)
+    AI-->>App: Report Text
     App->>TTS: Synthesize Report
     TTS-->>App: Audio Buffer
     App->>User: Download Logs (Session + Summary)

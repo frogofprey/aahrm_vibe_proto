@@ -90,6 +90,13 @@ export interface NarrativeMilestone {
   narrative: string;
 }
 
+export interface ParsedNarrativePlan {
+  theme?: string;
+  maguffin?: string;
+  missionComplete?: string;
+  bonus?: string;
+}
+
 export interface TrainingObjective {
   title: string;
   targetZones: number[];

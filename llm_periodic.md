@@ -5,6 +5,7 @@ This document describes the structure and elements of the periodic LLM prompt us
 ## 1. Task Section (`<task>`)
 Defines the core logic and output requirements. This is the most static part of the prompt.
 **Constraint**: 600 `maxOutputTokens` in `generationConfig`.
+**Model**: User-selected (Gemma/Gemini) with `ThinkingLevel.MINIMAL`.
 
 - **General Instructions**: 
     - **Data Input**: How to interpret the telemetry, importance, and safety metrics in `<current_minute_packet>`.
@@ -32,7 +33,6 @@ Maintains continuity by providing the immediate past (previous 3 minutes of feed
 Streamlined real-time telemetry and coaching direction.
 
 - **BPM**: (cur/avg/max/min) slash-separated values.
-- **Trend (10s)**: Qualitative descriptor of recent movement.
 - **Coaching Direction**: The calculated directive for the user.
 - **Importance**: The calculated urgency for this update.
 - **Safety Flag**: Explicit alert if safety limits are breached.

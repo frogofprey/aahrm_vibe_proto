@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { GoogleGenAI, Modality, ThinkingLevel } from "@google/genai";
-import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone, TrainingObjective } from './types';
+import { ConnectionStatus, HeartRateData, ZoneConfig, MinuteSummary, TokenUsage, SessionContext, SessionState, PersonaConfig, AiInsightResponse, NarrativeMilestone, TrainingObjective, ParsedNarrativePlan } from './types';
 import DashboardHeader from './components/DashboardHeader';
 import HeartRateDisplay from './components/HeartRateDisplay';
 import HeartRateChart from './components/HeartRateChart';
@@ -9,6 +9,7 @@ import DebugLog from './components/DebugLog';
 import AggregatorPanel from './components/AggregatorPanel';
 import { personalityData } from './personality';
 import { TRAINING_OBJECTIVES } from './training_objectives';
+import { generateMissionPlanTemplate } from './services/missionPlanGenerator';
 
 // --- Audio Decoding Utilities ---
 function decodeBase64(base64: string) {
@@ -266,7 +267,7 @@ const App: React.FC = () => {
 
   const sessionIntroRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
   const missionProfileRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
-  const narrativeMissionPlanRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null);
+  const narrativeMissionPlanRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage; parsedValue?: ParsedNarrativePlan } | null>(null);
   const finalSessionReportRef = useRef<{ prompt: string; text: string; tokenUsage?: TokenUsage } | null>(null); // Final report storage
   
   // Audio Context & Queue Refs
@@ -1233,6 +1234,8 @@ const App: React.FC = () => {
   const generateNarrativeMissionPlan = useCallback(async (profileText: string) => {
       const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
       const strategy = (currentObjective as any).transitionStrategy || "normal state";
+      const exampleFormat = generateMissionPlanTemplate(strategy, sessionDurationGoal, intervalTime, intervalCountGoal);
+
       const isInterval = strategy === "interval state" || strategy === "fixed interval state";
       const sessionContext = isInterval 
         ? `Session Structure: ${intervalCountGoal} intervals of ${intervalTime} minutes each.`
@@ -1242,61 +1245,22 @@ const App: React.FC = () => {
         ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
         : "";
 
-      let exampleFormat = "";
-      if (strategy === "interval state") {
-          exampleFormat = `
-      [THEME]: [Insert high-level thematic setting for an interval session here]
-      [MAGUFFIN]: [Insert the specific, thematic goal or item being pursued]
-      [TIMELINE]:
-       0:00 [Interval 1 Name] || [Thematic description of the first high-intensity interval. Encourage effort and target zone engagement.]
-       3:00 [Recovery 1 Name] || [Thematic description of the first recovery period. Encourage heat shedding and heart rate reduction.]
-       6:00 [Interval 2 Name] || [Thematic description of the second high-intensity interval. Escalation of the thematic challenge.]
-       9:00 [Recovery 2 Name] || [Thematic description of the second recovery period. Brief pause in action or regrouping.]
-      12:00 [Interval 3 Name] || [Thematic description of the final high-intensity push or climax.]
-      15:00 [Recovery 3 Name] || [Thematic description of the final cool-down transition.]
-      18:00 [Mission Success Name] || [Resolution of the thematic encounter.]
-
-      [Mission Complete]: [Final thematic victory message! Summary of accomplishment.]
-      [Maguffin]: [The name of the item or objective secured]
-      [BONUS]: [Description of thematic rewards for continuing past the goal time.]
-      `;
-      } else if (strategy === "normal state") {
-          exampleFormat = `
-      [THEME]: [Insert the high-level thematic setting here, e.g., Sci-Fi, Fantasy, Gym]
-      [MAGUFFIN]: [Insert the specific, thematic item or goal the user is working toward]
-      [TIMELINE]
-      0:00 [Event Name] || [Insert thematic description of the session beginning. Do not use persona-specific slang.]
-      5:00 [Event Name] || [Insert description of a mid-point complication or environmental change.]
-      8:00 [Event Name] || [Insert description of the climax or final push.]
-      10:00 [Event Name] || [Insert description of the resolution and cooldown transition.]
-      [BONUS]:	[Insert description of bonus rewards for continuing the session] 
-      `;
-      } else {
-          // Default: Fixed State
-          exampleFormat = `
-      [THEME]: [Insert the high-level thematic setting for a fixed-state session here]
-      [TIMELINE]:
-      (Timeline is blank for fixed state objectives)
-
-      [Mission Complete]: [Thematic success message! e.g., Objectives secured!]
-      [Maguffin]: [The specific goal item or objective]
-      [BONUS]: [Description of bonus rewards for extra effort beyond the goal.]
-      `;
-      }
-
       const taskSection = `<task>
 [GENERAL INSTRUCTIONS]
-You are an expert author/Narrative creator. Based on the following Mission Profile and Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. 
+You are an expert author/Narrative creator. Based on the following Persona, create a "Narrative Mission Plan" to guide a session story arc that will be used by an LLM tracking the users progress through a workout ensuring that they are staying in the desired heart rate zone and notifying them of session milestones. For this task, only consider the Persona characteristics for the theme and plan; don't literally interpret the persona instructions here. The format provided in the OUTPUT FORMAT section provides the main framework for the session. Replace the text in the last set of brackets [] in each line with a thematic interpretation of that milestone or goal. 
 
 [REQUIREMENTS]
-1. Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
-2. Define specific Milestones/Narrative events triggering at least every 5 minutes (e.g., at 5m, 10m, 15m...). If expected time for the session is more than 5 minutes, give a 2 minute warning as well. Condense the timeline if needed for shorter sessions. the model is only called on 1 minute intervals so any events occurring more quickly than that will be lost. Incorporate planned state transitions into the plan as best as is possible. 
-3. Define a "Mission Complete" narrative conclusion (Goals Met). Generate a Maguffin for the persona to use narratively. 
-4. Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
-5. Ensure that you match the structure of the session. If the session is based on intervals, ensure that you capture each interval transition and try to theme each transition using the persona's instructions. Focus on the transitions. Note that the interval time provided will be for both interval and recovery as well (so a 3 minute interval time will produce a 6 minute cycle).  If the session is time based, try to create reasonable milestones based on the template. In both cases it may be necessary to adjust timing to match user parameters. Don't include milestones or sections for warmup as they will be handled outside of the mission script. 
+-Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
+-Preserve the Milestones provided in the OUTPUT FORMAT section. Don't add new milestones, simply make the provided milestones more thematic.   
+-Define a "Mission Complete" narrative conclusion (Goals Met). 
+-Generate a Maguffin for the persona to use narratively. 
+-Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
 
 [CONSTRAINTS]
-Hard Constraint: Don't use markdown or JSON in the final output. 
+Hard Constraint: Output should match the OUTPUT FORMAT block - do not devaiate from this format. 
+STRICT REPLACEMENT: You must keep the exact structural format of the timeline. ONLY replace the text inside the placeholder brackets (e.g., '[Insert description]'). 
+PRESERVE TIMESTAMPS: Do NOT alter, add, or remove any 'M:SS' timestamps.
+THIRD-PERSON TONE: Write in a neutral, cinematic, third-person voice. Describe the events like a dungeon master. Do NOT roleplay as the Persona (e.g., do not use the persona's slang or first-person pronouns).
 
 [OUTPUT FORMAT]
 ${exampleFormat}
@@ -1307,22 +1271,18 @@ Identity: ${personaConfig.systemInstruction}
 Mission Instruction: ${personaConfig.missionProfile}
 </persona>`;
 
-      const missionProfileSection = `<mission_profile>
-${profileText}
-</mission_profile>`;
-
       const sessionContextSection = `<session_context>
 ${sessionContext}${activityContext}
 </session_context>`;
 
-      const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionContextSection}`;
+      const prompt = `${taskSection}\n\n${personaSection}\n\n${sessionContextSection}`;
 
       try {
           addLog(`AI_REQUEST: Generating Narrative Mission Plan...`);
           addLog(`[DEBUG_NARRATIVE_PLAN_PROMPT] ${prompt}`);
 
           const { response, durationMs } = await generateContentWithRetry(
-              'gemini-3-flash-preview',
+              selectedModel,
               prompt,
               { maxOutputTokens: 1024 },
               2, // 2 retries
@@ -1331,7 +1291,6 @@ ${sessionContext}${activityContext}
 
           const tokenUsage = extractUsage(response);
           const narrativeText = response.text || "Narrative generation failed.";
-          narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage };
           addLog(`[NARRATIVE_PLAN] ${narrativeText}`);
           const networkTimeMs = durationMs;
           const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
@@ -1377,11 +1336,30 @@ ${sessionContext}${activityContext}
           
           narrativeMilestonesRef.current = parsedMilestones;
           
+          // Parsing additional fields: Theme, Maguffin, Mission Complete, Bonus
+          const themeMatch = narrativeText.match(/\[THEME\]:?\s*(.*)/i);
+          const maguffinMatch = narrativeText.match(/\[MAGUFFIN\]:?\s*(.*)/i);
+          const missionCompleteMatch = narrativeText.match(/\[MISSION COMPLETE\]:?\s*(.*)/i);
+          const bonusMatch = narrativeText.match(/\[BONUS\]:?\s*(.*)/i);
+
+          const parsedValue: ParsedNarrativePlan = {
+              theme: themeMatch ? themeMatch[1].trim() : undefined,
+              maguffin: maguffinMatch ? maguffinMatch[1].trim() : undefined,
+              missionComplete: missionCompleteMatch ? missionCompleteMatch[1].trim() : undefined,
+              bonus: bonusMatch ? bonusMatch[1].trim() : undefined
+          };
+
+          narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage, parsedValue };
+          
           if (parsedMilestones.length > 0) {
               addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES ---`);
               parsedMilestones.forEach(m => {
                   addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}`);
               });
+              if (parsedValue.theme) addLog(`  [THEME] ${parsedValue.theme}`);
+              if (parsedValue.maguffin) addLog(`  [MAGUFFIN] ${parsedValue.maguffin}`);
+              if (parsedValue.missionComplete) addLog(`  [COMPLETE] ${parsedValue.missionComplete}`);
+              if (parsedValue.bonus) addLog(`  [BONUS] ${parsedValue.bonus}`);
               addLog(`SYSTEM: -----------------------------------------`);
           }
 
@@ -1390,7 +1368,7 @@ ${sessionContext}${activityContext}
           narrativeMissionPlanRef.current = null;
           narrativeMilestonesRef.current = [];
       }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, generateContentWithRetry]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, generateContentWithRetry, isActivityVerbalizationEnabled, selectedActivity, customActivity, selectedModel]);
 
   const generateIntroMessage = useCallback(async () => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1709,7 +1687,6 @@ ${historyContext || "No recent history available."}
     // 7. Current Minute Packet Section (Volatile)
     const currentMinutePacketSection = `<current_minute_packet>
 BPM: (cur/avg/max/min) ${summary.smoothedHR}/${summary.avg}/${summary.max}/${summary.min}
-Trend (10s): ${hrTrend}
 Coaching Direction: ${summary.coachingDirection}
 Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : ""}
 </current_minute_packet>`;
