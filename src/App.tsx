@@ -1043,8 +1043,9 @@ const App: React.FC = () => {
                       model: ollamaModelName,
                       prompt: typeof contents === 'string' ? contents : JSON.stringify(contents),
                       stream: false,
+                      think: "low",
                       options: {
-                          num_predict: generationConfig?.maxOutputTokens || 1024
+                          num_predict: Math.round((generationConfig?.maxOutputTokens || 1024) * 1.50)
                       }
                   })
               });
