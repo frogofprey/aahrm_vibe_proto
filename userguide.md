@@ -72,6 +72,12 @@ Before starting, configure your profile in the top bar. Click **"Apply & Persist
     *   The AI assigns a "Saliency Score" to every insight.
     *   If `Score >= Threshold`, the AI speaks via Text-to-Speech.
     *   *Lower* values (1-3) make the coach chattier; *Higher* values (7+) restrict voice to urgent alerts only.
+*   **AI Model**: Selects the cognitive backend for insights and narrative mission generation:
+    *   *API Models*: Options include Gemma 4 26b, Gemma 4 31b, Gemini 3.1 Flash, and Gemini 3.1 Flash Lite.
+    *   *Local Models*: Connects to client-side local Ollama servers (Gemma 4 e2b / e4b) with root `"think": "low"` and padded context. Real-time endpoint customization is supported.
+*   **TTS Model**: Determines the speech synthesizer engine:
+    *   *Gemini TTS Models*: Supports Gemini 3.1 Flash, Gemini 2.5 Flash, or Gemini 2.5 Pro vocal synthesis.
+    *   *PocketTTS*: Standard OpenAI-compliant offline TTS audio generation at a custom URL (e.g., `http://localhost:8000/v1/audio/speech`) with the static `'ginger-chan'` voice characterization.
 
 ### Connection
 *   **WS Endpoint**: The address of your WebSocket server (e.g., `ws://192.168.1.50:8080`).

@@ -15,12 +15,13 @@ The application allows users to select their preferred model via a pulldown in t
 6.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
 
 **Local Ollama Integration**:
-When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps `gemma-4-e2b` to `gemma4:e2b` and `gemma-4-e4b` to `gemma4:latest`. This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions.
+When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps `gemma-4-e2b` to `gemma4:e2b` and `gemma-4-e4b` to `gemma4:latest`. This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions. For local models, a top-level `"think": "low"` property is injected, and the output token limit (`num_predict`) is padded by a factor of 1.50 to support offline generation depth.
 
 **Key Parameters**:
-*   **Thinking Level**: All models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses.
+*   **Thinking Level / Mode**: API models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses. Local models utilize the explicit `"think": "low"` configuration at the root request level.
 *   **Mission Generation**: Now utilizes the **selected user model** (defaulting to Gemma 4 26b) for narrative planning, ensuring consistency across all session calls.
-*   **Audio Synthesis**: Uses `gemini-2.5-flash-preview-tts` for voice output.
+*   **Audio Synthesis & Selector**: Supports multiple TTS models including Google Gemini's audio-modality models and local PocketTTS endpoints, configured through the Dashboard Header control unit.
+*   **Latency Metrics**: Latency checks (both LLM prompt network duration and TTS synthesis time in milliseconds) are measured, appended directly to the session logging payloads, and displayed live in the user interface.
 
 ---
 
@@ -120,8 +121,16 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
 ## 4. Text-to-Speech (TTS) Pipeline
 
 *   **Trigger**: Called by Intro (C), Minute Analysis (D), or Final Report (E).
-*   **Model**: `gemini-2.5-flash-preview-tts`.
-*   **Input**: 
+*   **Model Options**:
+    1.  **Gemini 3.1 Flash TTS Preview** (`gemini-3.1-flash-tts-preview`) - Native high-fidelity speech synthesis.
+    2.  **Gemini 2.5 Flash Preview TTS** (`gemini-2.5-flash-preview-tts`) - Highly optimized low-latency preview model.
+    3.  **Gemini 2.5 Pro Preview TTS** (`gemini-2.5-pro-preview-tts`) - Sophisticated high-fidelity voice characterization.
+    4.  **PocketTTS** (`pocket-tts`) - Local/offline endpoint.
+*   **PocketTTS Dynamic Endpoint**:
+    *   Housed at a customizable local URL (defaults to `http://localhost:8000/`).
+    *   Requests of audio generation target the standard OpenAI-compliant `/v1/audio/speech` format.
+    *   Synthesizes using a fixed static voice: `'ginger-chan'`.
+*   **Input (Gemini Audio Modality Models)**:
     *   Text to speak.
     *   `ttsInstruction`: Persona-specific direction (e.g., "Speak fast and manic").
     *   `voiceName`: Specific voice model ID (e.g., 'Kore', 'Puck').

@@ -125,7 +125,9 @@ const STORAGE_KEYS = {
   SELECTED_ACTIVITY: 'aetheraegis_selected_activity',
   CUSTOM_ACTIVITY: 'aetheraegis_custom_activity',
   AI_MODEL: 'aetheraegis_ai_model',
-  OLLAMA_URL: 'aetheraegis_local_ollama_url'
+  OLLAMA_URL: 'aetheraegis_local_ollama_url',
+  TTS_MODEL: 'aetheraegis_tts_model',
+  POCKET_TTS_URL: 'aetheraegis_pocket_tts_url'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -190,6 +192,8 @@ const App: React.FC = () => {
   const [customActivity, setCustomActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.CUSTOM_ACTIVITY) || '');
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.AI_MODEL) || 'gemma-4-26b-a4b-it');
   const [localOllamaUrl, setLocalOllamaUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.OLLAMA_URL) || 'http://localhost:11434');
+  const [selectedTtsModel, setSelectedTtsModel] = useState(() => localStorage.getItem(STORAGE_KEYS.TTS_MODEL) || 'gemini-2.5-flash-preview-tts');
+  const [pocketTtsUrl, setPocketTtsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.POCKET_TTS_URL) || 'http://localhost:8000/');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -898,6 +902,7 @@ const App: React.FC = () => {
         contentDebug += `   > MILESTONE  : ${s.milestoneLabel && s.milestoneLabel !== "none" ? s.milestoneLabel : "none"}\n`;
         contentDebug += `   > IMPORTANCE : ${s.importance || 0}/10\n`;
         contentDebug += `   > METRICS    : ${s.calories.toFixed(1)} kcal | ${s.heartPoints} HP\n`;
+        contentDebug += `   > LATENCY    : LLM ${s.llmLatency !== undefined ? (s.llmLatency / 1000).toFixed(2) + 's' : "N/A"}${s.ttsLatency !== undefined ? ` | TTS ${(s.ttsLatency / 1000).toFixed(2)}s` : " | TTS N/A"}\n`;
         contentDebug += `   > AI PROMPT : \n${s.prompt || "N/A"}\n`;
         contentDebug += `   > AI ANALYST : ${s.insight || "Analysis pending or failed."}\n`;
         contentDebug += `   > AI JSON    : ${s.rawJson || "N/A"}\n`;
@@ -1118,7 +1123,7 @@ const App: React.FC = () => {
       }
   }, [addLog, localOllamaUrl]);
 
-  const speakInsight = useCallback(async (text: string, customTtsInstruction?: string) => {
+  const speakInsight = useCallback(async (text: string, customTtsInstruction?: string, summaryId?: string) => {
     if (!isVoiceEnabled) return;
     
     if (!text || !text.trim()) {
@@ -1146,57 +1151,105 @@ const App: React.FC = () => {
     while (attempt <= maxRetries) {
       try {
         const isRetry = attempt > 0;
-        addLog(`VOICE: Synthesizing insight via Gemini TTS (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+        let audioBuffer: AudioBuffer;
+        const currentTtsModel = selectedTtsModel || 'gemini-2.5-flash-preview-tts';
         
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash-preview-tts",
-          contents: [{ parts: [{ text: finalTtsPrompt }] }],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voiceName },
+        if (currentTtsModel === 'pocket-tts') {
+          const baseUrl = pocketTtsUrl.trim().replace(/\/+$/, '') || 'http://localhost:8000';
+          const pocketUrl = `${baseUrl}/v1/audio/speech`;
+          addLog(`VOICE: Synthesizing via PocketTTS [ginger-chan] at ${pocketUrl}...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+          
+          const res = await fetch(pocketUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: "tts-1",
+              input: text,
+              voice: "ginger-chan"
+            })
+          });
+          
+          if (!res.ok) {
+            throw new Error(`PocketTTS HTTP error: ${res.status} ${res.statusText}`);
+          }
+          
+          const arrayBuffer = await res.arrayBuffer();
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          }
+          const ctx = audioContextRef.current;
+          audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+          
+          const networkTimeMs = performance.now() - startTime;
+          const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+          const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
+          addLog(`VOICE: ${networkTimeStr} ${audioDurationStr}`);
+        } else {
+          addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+          
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+            model: currentTtsModel,
+            contents: [{ parts: [{ text: finalTtsPrompt }] }],
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: voiceName },
+                },
               },
             },
-          },
-        });
-        
-        const networkTimeMs = performance.now() - startTime;
-        const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
-        console.log(`VOICE_TTS: ${networkTimeStr}`);
+          });
+          
+          const networkTimeMs = performance.now() - startTime;
+          const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+          console.log(`VOICE_TTS: ${networkTimeStr}`);
 
-        // Log token usage for TTS if available
-        const tokenUsage = extractUsage(response);
-        
-        const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-        if (!base64Audio) {
-            throw new Error("API returned no audio data");
+          // Log token usage for TTS if available
+          const tokenUsage = extractUsage(response);
+          
+          const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (!base64Audio) {
+              throw new Error("API returned no audio data");
+          }
+
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          }
+          
+          const ctx = audioContextRef.current;
+
+          audioBuffer = await decodeAudioData(
+            decodeBase64(base64Audio),
+            ctx,
+            24000,
+            1,
+          );
+
+          const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
+          console.log(`VOICE_TTS: ${audioDurationStr}`);
+
+          const combinedMetrics = `${networkTimeStr} ${audioDurationStr}`;
+
+          if (tokenUsage) {
+              addLog(`VOICE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${combinedMetrics}`);
+          } else {
+              addLog(`VOICE: ${combinedMetrics}`);
+          }
         }
 
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        }
-        
-        const ctx = audioContextRef.current;
-        // NOTE: We don't await resume here to avoid blocking generation loop; queue processor handles resume.
-
-        const audioBuffer = await decodeAudioData(
-          decodeBase64(base64Audio),
-          ctx,
-          24000,
-          1,
-        );
-
-        const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
-        console.log(`VOICE_TTS: ${audioDurationStr}`);
-
-        const combinedMetrics = `${networkTimeStr} ${audioDurationStr}`;
-
-        if (tokenUsage) {
-            addLog(`VOICE: [Tokens: In ${tokenUsage.input} / Out ${tokenUsage.output}] ${combinedMetrics}`);
-        } else {
-            addLog(`VOICE: ${combinedMetrics}`);
+        // Record TTS latency inside summary/packet logging if summaryId matches
+        const finalNetworkTimeMs = performance.now() - startTime;
+        if (summaryId) {
+          const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summaryId);
+          if (logIndex !== -1) {
+            allSessionSummariesRef.current[logIndex].ttsLatency = finalNetworkTimeMs;
+          }
+          setSummaries(prev => prev.map(s => 
+            s.id === summaryId ? { ...s, ttsLatency: finalNetworkTimeMs } : s
+          ));
         }
 
         // Queue the audio instead of playing immediately
@@ -1226,7 +1279,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue]);
+  }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue, selectedTtsModel, pocketTtsUrl]);
 
   const generateMissionProfile = useCallback(async (): Promise<string> => {
     const mhr = 220 - age;
@@ -1629,7 +1682,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         
         const tokenUsage = extractUsage(response);
         const llmModel = selectedModel;
-        const ttsModel = 'gemini-2.5-flash-preview-tts';
+        const ttsModel = selectedTtsModel || 'gemini-2.5-flash-preview-tts';
         const reportText = response.text || "Session concluded. Data saved.";
         const networkTimeMs = durationMs;
         const networkTimeStr = `[Network Time: ${(networkTimeMs / 1000).toFixed(2)}s]`;
@@ -1655,7 +1708,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal, selectedModel]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal, selectedModel, selectedTtsModel]);
 
   const requestAiInsight = useCallback(async (summary: MinuteSummary) => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1786,13 +1839,14 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
           addLog(`AI_USAGE: ${networkTimeStr}`);
       }
 
-      // Update the log history ref with the new insight and prompt
+       // Update the log history ref with the new insight and prompt
       const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summary.id);
       if (logIndex !== -1) {
         allSessionSummariesRef.current[logIndex].insight = insight;
         allSessionSummariesRef.current[logIndex].prompt = prompt; // Store prompt for file log
         allSessionSummariesRef.current[logIndex].isAnalyzing = false;
         allSessionSummariesRef.current[logIndex].tokenUsage = tokenUsage;
+        allSessionSummariesRef.current[logIndex].llmLatency = durationMs;
         if ((response as any).rawJson) {
             allSessionSummariesRef.current[logIndex].rawJson = (response as any).rawJson;
         }
@@ -1805,6 +1859,7 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
             isAnalyzing: false, 
             prompt, 
             tokenUsage,
+            llmLatency: durationMs,
             ...((response as any).rawJson ? { rawJson: (response as any).rawJson } : {})
         } : s
       ));
@@ -1813,7 +1868,7 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
       const importance = summary.importance ?? 0;
       if (importance >= chattiness) {
           // Pre-pend baseline TTS instruction as requested
-          speakInsight(insight, personaConfig.ttsBaselineInstruction);
+          speakInsight(insight, personaConfig.ttsBaselineInstruction, summary.id);
       } else {
           addLog(`VOICE_SKIP: Importance (${importance}) < Threshold (${chattiness}).`);
       }
@@ -2292,6 +2347,8 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
     localStorage.setItem(STORAGE_KEYS.SELECTED_ACTIVITY, selectedActivity);
     localStorage.setItem(STORAGE_KEYS.CUSTOM_ACTIVITY, customActivity);
     localStorage.setItem(STORAGE_KEYS.AI_MODEL, selectedModel);
+    localStorage.setItem(STORAGE_KEYS.TTS_MODEL, selectedTtsModel);
+    localStorage.setItem(STORAGE_KEYS.POCKET_TTS_URL, pocketTtsUrl);
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -2558,6 +2615,36 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
                       placeholder="http://localhost:11434"
                       className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors w-40"
                       title="Ollama Base URL (e.g., http://localhost:11434 or Ngrok tunnel)"
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="h-10 w-px bg-white/5 hidden md:block" />
+
+              <div className="flex flex-col">
+                <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">TTS Model</label>
+                <div className="flex gap-2 items-center">
+                  <select value={selectedTtsModel} onChange={(e) => {
+                    setSelectedTtsModel(e.target.value);
+                    localStorage.setItem(STORAGE_KEYS.TTS_MODEL, e.target.value);
+                  }} className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-emerald-400/50 transition-colors appearance-none cursor-pointer w-48">
+                    <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview</option>
+                    <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash Preview TTS</option>
+                    <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro Preview TTS</option>
+                    <option value="pocket-tts">PocketTTS</option>
+                  </select>
+                  {selectedTtsModel === 'pocket-tts' && (
+                    <input
+                      type="text"
+                      value={pocketTtsUrl}
+                      onChange={(e) => {
+                        setPocketTtsUrl(e.target.value);
+                        localStorage.setItem(STORAGE_KEYS.POCKET_TTS_URL, e.target.value);
+                      }}
+                      placeholder="http://localhost:8000/"
+                      className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-400/50 transition-colors w-40"
+                      title="PocketTTS Base URL (default is http://localhost:8000/)"
                     />
                   )}
                 </div>

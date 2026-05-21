@@ -83,7 +83,11 @@ const AggregatorPanel: React.FC<AggregatorPanelProps> = ({ summaries, introText,
                   <span className="text-cyan-500 font-bold text-xs">[{s.timestamp}]</span>
                   <div className="flex flex-col">
                     <span className="text-[8px] text-cyan-700 uppercase tracking-tighter font-black leading-none mb-1">PKT_TYPE: MINUTE_SUMMARY</span>
-                    <span className="text-[7px] text-slate-500 uppercase tracking-widest">SAMPLES: {s.sampleCount}</span>
+                    <span className="text-[7px] text-slate-500 uppercase tracking-widest">
+                      SAMPLES: {s.sampleCount}
+                      {s.llmLatency !== undefined && ` | LLM: ${(s.llmLatency/1000).toFixed(2)}s`}
+                      {s.ttsLatency !== undefined && ` | TTS: ${(s.ttsLatency/1000).toFixed(2)}s`}
+                    </span>
                   </div>
                 </div>
                 

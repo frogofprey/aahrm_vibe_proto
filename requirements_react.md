@@ -52,8 +52,12 @@ Settings are organized into functional groups, easily accessible via a unified *
     *   `Gemini 3.1 Flash`
     *   `Gemma 4 e2b (Local)` (Workstation Ollama offline engine)
     *   `Gemma 4 e4b (Local)` (Workstation Ollama offline engine)
+    *   *Inputs*: Choosing a local model renders a network address text input to calibrated endpoint connections.
+*   **TTS Model Selector**: Allows custom configuration of speech engines:
+    *   `Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, or `Gemini 2.5 Pro Preview TTS` (high-fidelity cloud options).
+    *   `PocketTTS` (offline, local OpenAI-compliant `/v1/audio/speech` layout utilizing the custom address input; default voice is `'ginger-chan'`).
 *   **Chattiness Level Slider**: Controls AI frequency and narrative length (Low, Medium, High).
-*   **Voice Toggle**: Enable/disable Gemini TTS engine speech output directly.
+*   **Voice Toggle**: Enable/disable TTS engine speech output directly.
 
 ### D. Uplink & Telemetry Decoupling Controls
 *   **WebSocket/Bluetooth URL Input**: Direct server string target.

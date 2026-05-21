@@ -64,6 +64,8 @@ export interface MinuteSummary {
   importance?: number;
   activeTime?: number;
   smoothedHR?: number;
+  llmLatency?: number;
+  ttsLatency?: number;
 }
 
 export enum ConnectionStatus {
