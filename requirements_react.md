@@ -56,6 +56,7 @@ Settings are organized into functional groups, easily accessible via a unified *
 *   **TTS Model Selector**: Allows custom configuration of speech engines:
     *   `Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, or `Gemini 2.5 Pro Preview TTS` (high-fidelity cloud options).
     *   `PocketTTS` (offline, local OpenAI-compliant `/v1/audio/speech` layout utilizing the custom address input; default voice is `'ginger-chan'`).
+    *   `Kokoro TTS` (offline, local OpenAI-compliant `/v1/audio/speech` layout utilizing the custom address input; default model is `"kokoro"` and default voice is `"af_heart"`).
 *   **Chattiness Level Slider**: Controls AI frequency and narrative length (Low, Medium, High).
 *   **Voice Toggle**: Enable/disable TTS engine speech output directly.
 

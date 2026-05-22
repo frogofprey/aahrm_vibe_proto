@@ -127,7 +127,8 @@ const STORAGE_KEYS = {
   AI_MODEL: 'aetheraegis_ai_model',
   OLLAMA_URL: 'aetheraegis_local_ollama_url',
   TTS_MODEL: 'aetheraegis_tts_model',
-  POCKET_TTS_URL: 'aetheraegis_pocket_tts_url'
+  POCKET_TTS_URL: 'aetheraegis_pocket_tts_url',
+  KOKORO_TTS_URL: 'aetheraegis_kokoro_tts_url'
 };
 
 const MAX_DATA_POINTS = 50;
@@ -194,6 +195,7 @@ const App: React.FC = () => {
   const [localOllamaUrl, setLocalOllamaUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.OLLAMA_URL) || 'http://localhost:11434');
   const [selectedTtsModel, setSelectedTtsModel] = useState(() => localStorage.getItem(STORAGE_KEYS.TTS_MODEL) || 'gemini-2.5-flash-preview-tts');
   const [pocketTtsUrl, setPocketTtsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.POCKET_TTS_URL) || 'http://localhost:8000/');
+  const [kokoroTtsUrl, setKokoroTtsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.KOKORO_TTS_URL) || 'http://localhost:8800/');
 
   // Resolve full objective object
   const currentObjective = useMemo(() => 
@@ -1186,6 +1188,38 @@ const App: React.FC = () => {
           const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
           const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
           addLog(`VOICE: ${networkTimeStr} ${audioDurationStr}`);
+        } else if (currentTtsModel === 'kokoro-tts') {
+          const baseUrl = kokoroTtsUrl.trim().replace(/\/+$/, '') || 'http://localhost:8800';
+          const kokoroUrl = `${baseUrl}/v1/audio/speech`;
+          addLog(`VOICE: Synthesizing via Kokoro TTS [af_heart] at ${kokoroUrl}...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+          
+          const res = await fetch(kokoroUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: "kokoro",
+              input: text,
+              voice: "af_heart"
+            })
+          });
+          
+          if (!res.ok) {
+            throw new Error(`Kokoro TTS HTTP error: ${res.status} ${res.statusText}`);
+          }
+          
+          const arrayBuffer = await res.arrayBuffer();
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          }
+          const ctx = audioContextRef.current;
+          audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+          
+          const networkTimeMs = performance.now() - startTime;
+          const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
+          const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
+          addLog(`VOICE: ${networkTimeStr} ${audioDurationStr}`);
         } else {
           addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
           
@@ -1279,7 +1313,7 @@ const App: React.FC = () => {
         }
       }
     }
-  }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue, selectedTtsModel, pocketTtsUrl]);
+  }, [isVoiceEnabled, selectedPersona, addLog, processAudioQueue, selectedTtsModel, pocketTtsUrl, kokoroTtsUrl]);
 
   const generateMissionProfile = useCallback(async (): Promise<string> => {
     const mhr = 220 - age;
@@ -2349,6 +2383,7 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
     localStorage.setItem(STORAGE_KEYS.AI_MODEL, selectedModel);
     localStorage.setItem(STORAGE_KEYS.TTS_MODEL, selectedTtsModel);
     localStorage.setItem(STORAGE_KEYS.POCKET_TTS_URL, pocketTtsUrl);
+    localStorage.setItem(STORAGE_KEYS.KOKORO_TTS_URL, kokoroTtsUrl);
     
     // Resume AudioContext on user gesture
     if (!audioContextRef.current) {
@@ -2633,6 +2668,7 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
                     <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash Preview TTS</option>
                     <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro Preview TTS</option>
                     <option value="pocket-tts">PocketTTS</option>
+                    <option value="kokoro-tts">Kokoro TTS</option>
                   </select>
                   {selectedTtsModel === 'pocket-tts' && (
                     <input
@@ -2645,6 +2681,19 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
                       placeholder="http://localhost:8000/"
                       className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-400/50 transition-colors w-40"
                       title="PocketTTS Base URL (default is http://localhost:8000/)"
+                    />
+                  )}
+                  {selectedTtsModel === 'kokoro-tts' && (
+                    <input
+                      type="text"
+                      value={kokoroTtsUrl}
+                      onChange={(e) => {
+                        setKokoroTtsUrl(e.target.value);
+                        localStorage.setItem(STORAGE_KEYS.KOKORO_TTS_URL, e.target.value);
+                      }}
+                      placeholder="http://localhost:8800/"
+                      className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-2 py-1.5 focus:outline-none focus:border-emerald-400/50 transition-colors w-40"
+                      title="Kokoro TTS Base URL (default is http://localhost:8800/)"
                     />
                   )}
                 </div>

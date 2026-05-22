@@ -126,10 +126,15 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
     2.  **Gemini 2.5 Flash Preview TTS** (`gemini-2.5-flash-preview-tts`) - Highly optimized low-latency preview model.
     3.  **Gemini 2.5 Pro Preview TTS** (`gemini-2.5-pro-preview-tts`) - Sophisticated high-fidelity voice characterization.
     4.  **PocketTTS** (`pocket-tts`) - Local/offline endpoint.
+    5.  **Kokoro TTS** (`kokoro-tts`) - Local/offline endpoint.
 *   **PocketTTS Dynamic Endpoint**:
     *   Housed at a customizable local URL (defaults to `http://localhost:8000/`).
     *   Requests of audio generation target the standard OpenAI-compliant `/v1/audio/speech` format.
     *   Synthesizes using a fixed static voice: `'ginger-chan'`.
+*   **Kokoro TTS Dynamic Endpoint**:
+    *   Housed at a customizable local URL (defaults to `http://localhost:8800/`).
+    *   Requests of audio generation target the standard OpenAI-compliant `/v1/audio/speech` format.
+    *   Synthesizes using a fixed hardcoded model: `"kokoro"` and hardcoded voice: `"af_heart"`. Output format defaults to wav audio stream.
 *   **Input (Gemini Audio Modality Models)**:
     *   Text to speak.
     *   `ttsInstruction`: Persona-specific direction (e.g., "Speak fast and manic").

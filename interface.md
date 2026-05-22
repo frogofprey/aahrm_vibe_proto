@@ -68,7 +68,7 @@ The default screen uses a multi-faceted **Bento Grid** designed to fill a standa
     *   `Weight` Input: Numeric decimal, drives metabolic calorie burn calculations.
     *   `Gender` Selector: Dropdown setting modifiers for basal profiles.
     *   `Model` Selector: Dropdown containing available models (`Gemma 4 26b`, `Gemma 4 31b`, `Gemini 3.1 Flash Lite`, `Gemini 3.1 Flash`, plus local Ollama `Gemma 4 e2b` and `Gemma 4 e4b`). If a local OLLAMA model is chosen, a customizable base URL endpoint field displays.
-    *   `TTS Model` Selector: Dropdown containing available TTS models (`Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, `Gemini 2.5 Pro Preview TTS`, and `PocketTTS`). If `PocketTTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8000/`).
+    *   `TTS Model` Selector: Dropdown containing available TTS models (`Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, `Gemini 2.5 Pro Preview TTS`, `PocketTTS`, and `Kokoro TTS`). If `PocketTTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8000/`). If `Kokoro TTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8800/`).
     *   `Objective` Configurator: Handles training strategy target goals, duration limits, and interval counts.
     *   `Uplink Simulator Toggle`: Injects telemetry data packet sequences when a live heart rate sensor is absent.
 
@@ -123,6 +123,7 @@ To transition the app cleanly to alternative environments (Kotlin Native, PC, de
 | `selectedModel` | `string` | `"gemma-4-26b-a4b-it"` | `useState` | Determines current model path for content generation. |
 | `selectedTtsModel` | `string` | `"gemini-2.5-flash-preview-tts"` | `useState` | Determines current TTS model path for voice synthesis output. |
 | `pocketTtsUrl` | `string` | `"http://localhost:8000/"` | `useState` | Client-side base URL pointing to the local PocketTTS service instance. |
+| `kokoroTtsUrl` | `string` | `"http://localhost:8800/"` | `useState` | Client-side base URL pointing to the local Kokoro TTS service instance. |
 | `age` | `number` | `30` | `useState` | Basis for Maximum Heart Rate (`220 - age`). |
 | `weight` | `number` | `70` | `useState` | Drives calorie calculation formulas. |
 | `gender` | `string` | `"neutral"` | `useState` | Influences calorie and basal rate modifiers. |
