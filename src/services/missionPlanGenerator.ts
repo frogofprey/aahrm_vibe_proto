@@ -26,6 +26,8 @@ export function generateMissionPlanTemplate(
 ): string {
   let themePlaceholder = "[Insert high-level thematic setting here]";
   let maguffinPlaceholder = "[Insert the specific, thematic goal or item being pursued]";
+  let antagonistPlaceholder = "[Insert name of thematic opponent or opposing force for this session.]";
+  let protagonistPlaceholder = "[Insert thematic description of the user's role for this session]";
   let timeline: Milestone[] = [];
   let missionCompletePlaceholder = "[Final thematic victory message!]";
   let bonusPlaceholder = "[Description of thematic rewards for continuing past the goal time]";
@@ -122,6 +124,8 @@ export function generateMissionPlanTemplate(
   // Multi-line string format
   return `[THEME]: ${themePlaceholder}
 [MAGUFFIN]: ${maguffinPlaceholder}
+[ANTAGONIST]: ${antagonistPlaceholder}
+[PROTAGONIST]: ${protagonistPlaceholder}
 [TIMELINE]:
 ${timelineStr}
 

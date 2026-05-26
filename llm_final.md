@@ -12,7 +12,7 @@ Defines the core logic and constraints for the report.
     - Four sentence maximum.
     - State if requirements were satisfied.
     - Professional and summary-focused.
-    - Mention major milestones, the "Boss," and the "Maguffin."
+    - Mention major milestones, the "Boss," the "Antagonist," the "Protagonist," and the "Maguffin."
     - Use 'Active Duration' as the primary reference for intensity.
     - Include a final word of encouragement.
     - Telemetry abstraction rules (if enabled).

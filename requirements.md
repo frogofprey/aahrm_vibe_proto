@@ -36,7 +36,7 @@
     *   **Narrative Tone**: The LLM must adopt a neutral, cinematic, third-person "Dungeon Master" voice. It is strictly forbidden from roleplaying as the persona in the first person or altering calculated timestamps.
     *   **Persona Customization**: The generation prompt uses the persona's `missionProfile` for inspiration but no longer requires the technical `mission_profile` (biometric targets) to simplify the task and prevent AI drifting.
     *   **State Transitions**: Narrative triggers align with calculated programmatic milestones for "Warmup Completion" and "Mission Completion".
-    *   **Timeline Parsing**: The system extracts structured data from the generation response (parsing the `[TIMELINE]` block for milestones, plus `[THEME]`, `[MAGUFFIN]`, `[MISSION COMPLETE]`, and `[BONUS]` fields). This metadata is stored for narrative continuity and transition triggering.
+    *   **Timeline Parsing**: The system extracts structured data from the generation response (parsing the `[TIMELINE]` block for milestones, plus `[THEME]`, `[MAGUFFIN]`, `[ANTAGONIST]`, `[PROTAGONIST]`, `[MISSION COMPLETE]`, and `[BONUS]` fields). This metadata is stored for narrative continuity and transition triggering.
 
 ### 3. Session State Machine
 *   **INIT**: Initial configuration and mission briefing.

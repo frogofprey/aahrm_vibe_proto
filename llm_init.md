@@ -11,7 +11,7 @@ Used to establish the story arc for the session. Structured using XML-like tags,
 - **Requirements**: 
     - Recontextualization of workout goals.
     - Milestone definition (narrative events spaced throughout the session).
-    - Mission Complete/Maguffin definition.
+    - Mission Complete/Maguffin/Antagonist/Protagonist definition.
     - Bonus/Overtime context.
     - Structural matching (Intervals vs. Time).
 - **Constraints**: Hard constraint against markdown.

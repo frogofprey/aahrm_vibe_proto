@@ -1408,6 +1408,8 @@ You are an expert author/Narrative creator. Based on the following Persona, crea
 -Preserve the Milestones provided in the OUTPUT FORMAT section. Don't add new milestones, simply make the provided milestones more thematic.   
 -Define a "Mission Complete" narrative conclusion (Goals Met). 
 -Generate a Maguffin for the persona to use narratively. 
+-Define a short reference for the player in their thematic role labeled protagonist. This description should be 1-2 words at most. 
+-Define an antagonist or opposing forcer for the session with a thematic name labeled antagonist. This name should be 2-3 words at most. 
 -Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
 
 [CONSTRAINTS]
@@ -1415,6 +1417,7 @@ Hard Constraint: Output should match the OUTPUT FORMAT block - do not devaiate f
 STRICT REPLACEMENT: You must keep the exact structural format of the timeline. ONLY replace the text inside the placeholder brackets (e.g., '[Insert description]'). 
 PRESERVE TIMESTAMPS: Do NOT alter, add, or remove any 'M:SS' timestamps.
 THIRD-PERSON TONE: Write in a neutral, cinematic, third-person voice. Describe the events like a dungeon master. Do NOT roleplay as the Persona (e.g., do not use the persona's slang or first-person pronouns).
+ARTICLES: Avoid using "the" at the start of roles or rewards. Let the agent add them at runtime not now. 
 
 [OUTPUT FORMAT]
 ${exampleFormat}
@@ -1490,15 +1493,19 @@ ${sessionContext}${activityContext}
           
           narrativeMilestonesRef.current = parsedMilestones;
           
-          // Parsing additional fields: Theme, Maguffin, Mission Complete, Bonus
+          // Parsing additional fields: Theme, Maguffin, Antagonist, Protagonist, Mission Complete, Bonus
           const themeMatch = narrativeText.match(/\[THEME\]:?\s*(.*)/i);
           const maguffinMatch = narrativeText.match(/\[MAGUFFIN\]:?\s*(.*)/i);
+          const antagonistMatch = narrativeText.match(/\[ANTAGONIST\]:?\s*(.*)/i);
+          const protagonistMatch = narrativeText.match(/\[PROTAGONIST\]:?\s*(.*)/i);
           const missionCompleteMatch = narrativeText.match(/\[MISSION COMPLETE\]:?\s*(.*)/i);
           const bonusMatch = narrativeText.match(/\[BONUS\]:?\s*(.*)/i);
 
           const parsedValue: ParsedNarrativePlan = {
               theme: themeMatch ? themeMatch[1].trim() : undefined,
               maguffin: maguffinMatch ? maguffinMatch[1].trim() : undefined,
+              antagonist: antagonistMatch ? antagonistMatch[1].trim() : undefined,
+              protagonist: protagonistMatch ? protagonistMatch[1].trim() : undefined,
               missionComplete: missionCompleteMatch ? missionCompleteMatch[1].trim() : undefined,
               bonus: bonusMatch ? bonusMatch[1].trim() : undefined
           };
@@ -1512,6 +1519,8 @@ ${sessionContext}${activityContext}
               });
               if (parsedValue.theme) addLog(`  [THEME] ${parsedValue.theme}`);
               if (parsedValue.maguffin) addLog(`  [MAGUFFIN] ${parsedValue.maguffin}`);
+              if (parsedValue.antagonist) addLog(`  [ANTAGONIST] ${parsedValue.antagonist}`);
+              if (parsedValue.protagonist) addLog(`  [PROTAGONIST] ${parsedValue.protagonist}`);
               if (parsedValue.missionComplete) addLog(`  [COMPLETE] ${parsedValue.missionComplete}`);
               if (parsedValue.bonus) addLog(`  [BONUS] ${parsedValue.bonus}`);
               addLog(`SYSTEM: -----------------------------------------`);
@@ -1552,7 +1561,7 @@ ${sessionContext}${activityContext}
     const taskSection = `<task>
 [GENERAL INSTRUCTIONS]
 The user has just started a workout session. Generate an introduction to initiate the session.
-You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. If there is an antagonist, be sure to mention them by name. 
+You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. If there is an antagonist, be sure to mention them by name, and reinforce the user's thematic role if a protagonist was generated. 
 
 [CONSTRAINTS]
 - Strictly adhere to persona. 
@@ -1661,7 +1670,7 @@ The workout session has ended. Generate a final session report based on the cont
 - State if the user has satisfied the workout requirements with respect to time spent and/or zone compliance. Don't be afraid to note if requirements have not been met. 
 - Professional, summary-focused, and concluding. 
 - Be generous with the ending workout stats. 
-- Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss and Maguffin. 
+- Explicitly mention major milestones achieved (e.g., reaching target zones, completing objective time). Explicitly mention the boss, antagonist, protagonist role, and Maguffin. 
 - Use the 'Active Duration' (${activeMinutes} mins) as the primary reference for workout intensity and milestone timing.
 - Include a final word of encouragement.
 - ${abstractionInstruction}
@@ -1696,7 +1705,7 @@ Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinu
 ${transitionHistory}
 </transition_history>`;
 
-    const shortTermContextSection = `<short_term_context>
+    const shortTermContextSection = `<short_term_context> don't repeat these
 Last Minute Insight: ${lastSummary.insight || "N/A"}
 </short_term_context>`;
 

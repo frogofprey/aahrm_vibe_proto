@@ -53,7 +53,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
 *   **Implementation**: LLM call (selected user model) with a **Strict Structured Template**. 
     *   **Hard Constraints**: Match the provided structure exactly, preserve all `M:SS` timestamps, and only replace bracketed placeholders with "flavor" text.
     *   **Tone**: Use a neutral, cinematic, third-person "Dungeon Master" voice (not first-person persona roleplay).
-*   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[BONUS]`).
+*   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[ANTAGONIST]`, `[PROTAGONIST]`, `[BONUS]`).
 
 ### C. Session Intro
 *   **Trigger**: Called after the Mission Plan is generated.

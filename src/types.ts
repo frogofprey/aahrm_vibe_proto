@@ -95,6 +95,8 @@ export interface NarrativeMilestone {
 export interface ParsedNarrativePlan {
   theme?: string;
   maguffin?: string;
+  antagonist?: string;
+  protagonist?: string;
   missionComplete?: string;
   bonus?: string;
 }

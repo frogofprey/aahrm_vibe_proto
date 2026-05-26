@@ -131,7 +131,7 @@ To transition the app cleanly to alternative environments (Kotlin Native, PC, de
 | `currentSessionState` | `SessionState` | `"INIT"` | `useState` | Guides state-machine transitions (Warmup, Active, Cooldown, Complete). |
 | `simulatedTelemetry` | `boolean` | `false` | `useState` | Dictates if input is fake wave or actual sensor. |
 | `parsedMilestones` | `array` | `[]` | `useRef` | Parsed items extracted from `[TIMELINE]` block in Narrative generation. |
-| `parsedNarrative` | `ParsedNarrativePlan`| `{}` | `useRef` | Stores extracted `[THEME]`, `[MAGUFFIN]`, `[MISSION COMPLETE]`, etc. |
+| `parsedNarrative` | `ParsedNarrativePlan`| `{}` | `useRef` | Stores extracted `[THEME]`, `[MAGUFFIN]`, `[ANTAGONIST]`, `[PROTAGONIST]`, `[MISSION COMPLETE]`, etc. |
 
 ---
 
