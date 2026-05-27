@@ -60,7 +60,7 @@
 *   **AI Analysis**: Send the Minute Packet (plus Short-Term History context) to the selected LLM model (defaulting to `gemma-4-26b-a4b-it`) to generate a concise, goal-oriented coaching insight. The prompt is streamlined to focus on immediate telemetry and narrative immersion:
     *   **Model Selection**: Users can select from several models including Gemma 4 (26b/31b) and Gemini 3.1 Flash (Lite/Full) via a UI selector.
     *   **Thinking Mode**: For models that support "Thinking", the level is forced to **MINIMAL** to minimize latency and focus on direct instruction.
-    *   **Context Removal**: Redundant blocks like `<mission_profile>`, `<objective_tracker>`, `<transition_history>`, and `<current_timers>` are omitted from periodic updates to minimize latency and focus the LLM on current telemetry.
+    *   **Context Removal**: Redundant blocks like `<mission_profile>`, `<objective_tracker>`, `<transition_history>`, and `<current_timers>` are omitted from periodic updates to minimize latency and focus the LLM on current telemetry. However, a clean `<narrative_mission_plan>` block remains to supply key narrative components: the [THEME], [MAGUFFIN], [ANTAGONIST], and [PROTAGONIST].
     *   **Current Minute Restructuring**: The `<current_minute_packet>` provides current coaching HR (Smoothed BPM), average/max/min metrics, coaching direction, and an importance score (1-10).
     *   **Conditional Milestones**: A dedicated `<milestone>` block is injected only when an active narrative event matches the current packet time, providing the AI with the specific story beat to verbalize.
     *   **Response Handling**: The system extracts the plain text persona narration and prepends the persona's baseline TTS instruction before synthesis.

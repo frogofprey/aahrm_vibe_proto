@@ -142,15 +142,18 @@ const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite 
 
 const MILESTONE_INSTRUCTION = `Milestones: The <milestone> block includes an important narrative update for this session and should be heavily incorporated into your response. The milestone should be extremely clear to the user and in character. Ensure milestone updates don't contradict coaching guidance. The primary function of the milestone is to provide the user an idea about where they are in their session with respect to time.`;
 
+const WARMUP_STATE_INSTRUCTION = `Warmup State: The user is currently in a warmup state and is working to get their heart rate into the correct zone for the session to start in earnest. Encourage and acknowledge this.`;
+
 const BASE_SYSTEM_INSTRUCTION = `
 You are an agent that provides feedback and milestone based time cues to a user doing an exercise using a specific, themed persona in order to make that feedback more entertaining.
 Data Input: You will receive a <current_minute_packet> containing metrics about the user's effort, importance of the current update, and safety status.
 {{TELEMETRY_CONSTRAINT}}
-Anti-Repetition: Review <short_term_context> before writing. Vary on three levels: (1) sentence structure; (2) metaphor clusters; (3) catchphrases. Suspended when there is a Safety tag given in the <current_minute_packet>
-Corrections: the input telemetry in <current_minute_packet> will show you the users coaching direction and urgency. Provide instructions to move their heart rate to the target zone by giving clear instructions in character to slow down, speed up or maintain current pace.
+Coaching Direction: the input telemetry in <current_minute_packet> will show you the users coaching direction and urgency. Provide instructions to move their heart rate to the target zone by giving clear instructions in character to convey this coaching direction.
 {{MILESTONE_CONSTRAINT}}
+{{WARMUP_CONSTRAINT}}
 ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short and punchy.
-Return only the persona narration text. Do not use JSON or markdown.
+NARRATIVE FLOW: use the <short_term_context> block to create a narrative flow while still focusing on the coaching direction. Avoid repeating phrases or elements not connected with the coaching guidance. 
+Return only the persona narration text that would be useable by a follow on TTS service. Do not use JSON or markdown.
 `;
 
 const App: React.FC = () => {
@@ -1408,7 +1411,7 @@ You are an expert author/Narrative creator. Based on the following Persona, crea
 -Preserve the Milestones provided in the OUTPUT FORMAT section. Don't add new milestones, simply make the provided milestones more thematic.   
 -Define a "Mission Complete" narrative conclusion (Goals Met). 
 -Generate a Maguffin for the persona to use narratively. 
--Define a short reference for the player in their thematic role labeled protagonist. This description should be 1-2 words at most. 
+-Define a short reference for the player in their thematic role labeled protagonist. This reference should be a single word. 
 -Define an antagonist or opposing forcer for the session with a thematic name labeled antagonist. This name should be 2-3 words at most. 
 -Define a "Bonus/Overtime" narrative context (BONUS_ACTIVE state) so the persona will be able to continue a little past the goal if desired. 
 
@@ -1764,11 +1767,16 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
         const milestoneData = (narrativeMilestonesRef.current || []).find(m => m.label === summary.milestoneLabel);
         if (milestoneData) {
             milestoneSection = `<milestone>
-[${milestoneData.timeLabel}] ${milestoneData.label}: ${milestoneData.narrative}
+${milestoneData.label}: ${milestoneData.narrative}
 </milestone>`;
             milestoneInstruction = MILESTONE_INSTRUCTION;
         }
     }
+
+    // Warmup State Specific Instruction
+    const warmupInstruction = summary.sessionState === SessionState.WARMUP
+        ? WARMUP_STATE_INSTRUCTION
+        : "";
     
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
@@ -1782,7 +1790,8 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
 [GENERAL INSTRUCTIONS]
 ${BASE_SYSTEM_INSTRUCTION
     .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)
-    .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)}
+    .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)
+    .replace('{{WARMUP_CONSTRAINT}}', warmupInstruction)}
 
 [OUTPUT FORMAT]
 Return your response as plain text narration in the specified persona. Do not include any JSON, labels, or formatting characters.
@@ -1856,10 +1865,28 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
 
     // 8. Milestone Section (Conditional) - already prepared earlier
     
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${shortTermContextSection}\n\n${currentMinutePacketSection}${milestoneSection ? `\n\n${milestoneSection}` : ""}`;
+    let narrativeMissionPlanSection = "";
+    if (narrativeMissionPlanRef.current?.parsedValue) {
+        const pv = narrativeMissionPlanRef.current.parsedValue;
+        narrativeMissionPlanSection = `<narrative_mission_plan>
+[THEME]: ${pv.theme || "N/A"}
+[MAGUFFIN]: ${pv.maguffin || "N/A"}
+[ANTAGONIST]: ${pv.antagonist || "N/A"}
+[PROTAGONIST]: ${pv.protagonist || "N/A"}
+</narrative_mission_plan>`;
+    }
+    
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${narrativeMissionPlanSection ? `${narrativeMissionPlanSection}\n\n` : ""}${milestoneSection ? `${milestoneSection}\n\n` : ""}${shortTermContextSection}\n\n${currentMinutePacketSection}`;
 
     try {
       addLog(`AI_REQUEST [${selectedModel}]: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
+      if (summary.sessionState === SessionState.WARMUP) {
+          addLog(`SYSTEM: Active State matches WARMUP. Injecting state-specific warmup instruction.`);
+      }
+      if (narrativeMissionPlanRef.current?.parsedValue) {
+          const pv = narrativeMissionPlanRef.current.parsedValue;
+          addLog(`SYSTEM: Prompting with narrative plan [Theme: ${pv.theme || "N/A"} | Maguffin: ${pv.maguffin || "N/A"} | Antagonist: ${pv.antagonist || "N/A"} | Protagonist: ${pv.protagonist || "N/A"}]`);
+      }
       addLog(`[DEBUG_PROMPT_START]\n${prompt}\n[DEBUG_PROMPT_END]`);
       
       const { response, durationMs } = await generateContentWithRetry(

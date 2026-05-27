@@ -79,11 +79,12 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Trigger**: Every 60 seconds (triggered by wall-clock time accumulation).
 *   **Purpose**: Immediate coaching feedback on the last minute of performance.
 *   **Dependencies**: Requires at least 1 minute of telemetry.
-*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<mission_profile>`, `<objective_tracker>`, `<transition_history>`, `<short_term_context>`, `<current_minute_packet>`, `<current_timers>`), ordered from static to volatile data.
+*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<narrative_mission_plan>`, `<short_term_context>`, `<current_minute_packet>`), ordered from static to volatile data.
 *   **Context/Input**:
     *   **Persona**: Tailored system instruction.
-    *   **Goal Context**: User Goal, Mission Profile, Narrative Mission Plan.
+    *   **Narrative Mission Plan**: Extracted elements (Theme, Maguffin, Antagonist, Protagonist) to preserve narrative context.
     *   **Telemetry Abstraction Instruction** (Conditional).
+    *   **Warmup State Specific Instruction** (Conditional): Active only during the initial `WARMUP` state, urging character-safe encouragement to raise heart rate.
     *   **Activity Context** (Conditional).
     *   **Transition History**: Log of all state changes within the session.
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
