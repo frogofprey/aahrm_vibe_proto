@@ -10,6 +10,7 @@ import AggregatorPanel from './components/AggregatorPanel';
 import { personalityData } from './personality';
 import { TRAINING_OBJECTIVES } from './training_objectives';
 import { generateMissionPlanTemplate } from './services/missionPlanGenerator';
+import { generateRandomizedNarrativeSection } from './narrativeRandomizer';
 
 // --- Audio Decoding Utilities ---
 function decodeBase64(base64: string) {
@@ -140,20 +141,19 @@ const PERSONA_CONFIG: Record<string, PersonaConfig> = personalityData;
 
 const TELEMETRY_ABSTRACTION_INSTRUCTION = `Telemetry Abstraction: Do NOT recite raw BPM values (e.g., "145 bpm") unless the Safety flag is present. Instead, use qualitative descriptors appropriate for your personality and the mission.`;
 
-const MILESTONE_INSTRUCTION = `Milestones: The <milestone> block includes an important narrative update for this session and should be heavily incorporated into your response. The milestone should be extremely clear to the user and in character. Ensure milestone updates don't contradict coaching guidance. The primary function of the milestone is to provide the user an idea about where they are in their session with respect to time.`;
+const MILESTONE_INSTRUCTION = `Milestones: The milestone section includes an important narrative update for this session and should be heavily incorporated into your response. The milestone should be extremely clear to the user and in character. Ensure milestone updates don't contradict coaching guidance. The primary function of the milestone is to provide the user an idea about where they are in their session with respect to time.`;
 
 const WARMUP_STATE_INSTRUCTION = `Warmup State: The user is currently in a warmup state and is working to get their heart rate into the correct zone for the session to start in earnest. Encourage and acknowledge this.`;
 
 const BASE_SYSTEM_INSTRUCTION = `
 You are an agent that provides feedback and milestone based time cues to a user doing an exercise using a specific, themed persona in order to make that feedback more entertaining.
-Data Input: You will receive a <current_minute_packet> containing metrics about the user's effort, importance of the current update, and safety status.
+Data Input: You will receive a current_minute_packet containing metrics about the user's effort, importance of the current update, and potential safety status.
 {{TELEMETRY_CONSTRAINT}}
-Coaching Direction: the input telemetry in <current_minute_packet> will show you the users coaching direction and urgency. Provide instructions to move their heart rate to the target zone by giving clear instructions in character to convey this coaching direction.
+Coaching Direction: the input telemetry in current_minute_packet will show you the users coaching direction and urgency. Provide clear guidance to the user using the provided persona to convey the coaching direction. This guidance should be clear in the first few words of the output. The provided importance number can also be used. If the number is higher than 6, then the urgency should be increased. 
 {{MILESTONE_CONSTRAINT}}
-{{WARMUP_CONSTRAINT}}
 ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short and punchy.
-NARRATIVE FLOW: use the <short_term_context> block to create a narrative flow while still focusing on the coaching direction. Avoid repeating phrases or elements not connected with the coaching guidance. 
-Return only the persona narration text that would be useable by a follow on TTS service. Do not use JSON or markdown.
+NARRATIVE FLOW: use the narrative_mission_plan and short_term_context sections to create a narrative flow while still focusing on the coaching direction. Avoid repeating phrases or elements not directly connected with the coaching guidance. Include the protagonist tag in your response but only incorporate the other elements sparingly. 
+Return only the persona narration text that would be useable by a follow on TTS service.
 `;
 
 const App: React.FC = () => {
@@ -1542,11 +1542,9 @@ ${sessionContext}${activityContext}
     
     const strategy = (currentObjective as any).transitionStrategy || "normal state";
     let objectivesContext = `Mission Parameter: Target Duration: ${sessionDurationGoal} minutes`;
-    let examplePhrase = `"Let's make these ${sessionDurationGoal} minutes count"`;
 
     if (strategy === "interval state" || strategy === "fixed interval state") {
         objectivesContext = `Mission Parameter: Target Intervals: ${intervalCountGoal} cycles of ${intervalTime} minutes each.`;
-        examplePhrase = `"Let's smash these ${intervalCountGoal} intervals"`;
     }
     
     let narrativeContext = "";
@@ -1564,7 +1562,7 @@ ${sessionContext}${activityContext}
     const taskSection = `<task>
 [GENERAL INSTRUCTIONS]
 The user has just started a workout session. Generate an introduction to initiate the session.
-You are encouraged to reference the Mission Parameter naturally to set the stage (e.g., ${examplePhrase}), but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. If there is an antagonist, be sure to mention them by name, and reinforce the user's thematic role if a protagonist was generated. 
+You are encouraged to reference the Mission Parameter naturally to set the stage, but do not output it as a list. Speak to the user, don't read the settings back to them. If a Narrative Mission Plan is provided, incorporate the theme immediately. If there is a maguffin provided, be sure to mention it as the goal of the session. If there is an antagonist, be sure to mention them by name, and reinforce the user's thematic role if a protagonist was generated. 
 
 [CONSTRAINTS]
 - Strictly adhere to persona. 
@@ -1763,21 +1761,24 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     // 0. Milestone Check (Conditional) - Needed for prompt instructions
     let milestoneSection = "";
     let milestoneInstruction = "";
+    let isFinalMilestoneActive = false;
     if (summary.milestoneLabel && summary.milestoneLabel !== "none") {
         const milestoneData = (narrativeMilestonesRef.current || []).find(m => m.label === summary.milestoneLabel);
         if (milestoneData) {
-            milestoneSection = `<milestone>
-${milestoneData.label}: ${milestoneData.narrative}
-</milestone>`;
+            const sortedMilestones = [...(narrativeMilestonesRef.current || [])].sort((a, b) => a.timeInSeconds - b.timeInSeconds);
+            const isFinalMilestone = sortedMilestones.length > 0 && 
+                milestoneData.label === sortedMilestones[sortedMilestones.length - 1].label && 
+                milestoneData.timeInSeconds === sortedMilestones[sortedMilestones.length - 1].timeInSeconds;
+
+            if (isFinalMilestone) {
+                isFinalMilestoneActive = true;
+            }
+            milestoneSection = `milestone:
+${milestoneData.label}: ${milestoneData.narrative}`;
             milestoneInstruction = MILESTONE_INSTRUCTION;
         }
     }
 
-    // Warmup State Specific Instruction
-    const warmupInstruction = summary.sessionState === SessionState.WARMUP
-        ? WARMUP_STATE_INSTRUCTION
-        : "";
-    
     // Conditionally include Telemetry Abstraction Instruction
     const abstractionInstruction = isTelemetryAbstractionEnabled ? TELEMETRY_ABSTRACTION_INSTRUCTION : "";
     
@@ -1786,30 +1787,26 @@ ${milestoneData.label}: ${milestoneData.narrative}
         : "";
 
     // 1. Task Section (Static)
-    const taskSection = `<task>
+    const taskSection = `task:
 [GENERAL INSTRUCTIONS]
 ${BASE_SYSTEM_INSTRUCTION
     .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)
-    .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)
-    .replace('{{WARMUP_CONSTRAINT}}', warmupInstruction)}
+    .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)}
 
 [OUTPUT FORMAT]
-Return your response as plain text narration in the specified persona. Do not include any JSON, labels, or formatting characters.
-</task>`;
+Return your response as plain text narration in the specified persona. Do not include any JSON, labels, or formatting characters.`;
 
     // 2. Persona Section (Static)
-    const personaSection = `<persona>
+    const personaSection = `persona:
 Identity: ${personaIdentity}
-Brevity Driver: ${personaConfig.iterationBrevityDriver}
-</persona>`;
+Brevity Driver: ${personaConfig.iterationBrevityDriver}`;
 
     // 3. Mission Profile Section (Static)
-    const missionProfileSection = `<mission_profile>
+    const missionProfileSection = `mission_profile:
 Goal: ${currentObjective.title}
 ${activityContext}
 ${missionProfileRef.current ? `\nMISSION PROFILE (Baseline Targets):\n${missionProfileRef.current.text}` : ''}
-${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}` : ''}
-</mission_profile>`;
+${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${narrativeMissionPlanRef.current.text}` : ''}`;
 
     // --- HISTORY BUILDER START ---
     const allSummaries = allSessionSummariesRef.current;
@@ -1836,44 +1833,45 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
     const strategy = (currentObjective as any).transitionStrategy || "normal state";
     let objectiveStatus = `Time: ${totalPerformanceMinutes.toFixed(1)} / ${sessionDurationGoal} mins`;
     if (strategy === "interval state" || strategy === "fixed interval state") {
-        objectiveStatus = `Intervals: ${intervalCount} / ${intervalCountGoal}\nInterval Time: ${intervalTime} mins`;
+        objectiveStatus = `Intervals: ${runningMetricsRef.current.compliantMinutes.toFixed(1)} / ${intervalCountGoal}\nInterval Time: ${intervalTime} mins`;
     }
     objectiveStatus += `\nCompliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${totalPerformanceMinutes.toFixed(1)} performance minutes in target zone`;
     
-    const objectiveTrackerSection = `<objective_tracker>
+    const objectiveTrackerSection = `objective_tracker:
 ${objectiveStatus}
-[CURRENT SESSION STATE]: ${summary.sessionState}
-</objective_tracker>`;
+[CURRENT SESSION STATE]: ${summary.sessionState}`;
 
     // 5. Transition History Section (Semi-Volatile)
     const transitionHistory = sessionTransitionsRef.current.map(t => `[${t.timestamp}] ${t.message}`).join('\n');
-    const transitionHistorySection = `<transition_history>
-${transitionHistory || "No state transitions recorded."}
-</transition_history>`;
+    const transitionHistorySection = `transition_history:
+${transitionHistory || "No state transitions recorded."}`;
 
     // 6. Short-Term Context Section (Semi-Volatile)
-    const shortTermContextSection = `<short_term_context>
-${historyContext || "No recent history available."}
-</short_term_context>`;
+    const shortTermContextSection = `short_term_context:
+${historyContext || "No recent history available."}`;
+
+    let packetExtras = "";
+    if (summary.sessionState === SessionState.WARMUP) {
+        packetExtras += `\nWarmup State: The user is currently in a warmup state and is working to get their heart rate into the correct zone for the session to start in earnest. Encourage and acknowledge this.`;
+    }
+    if (isFinalMilestoneActive) {
+        packetExtras += `\nFinal Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery.`;
+    }
 
     // 7. Current Minute Packet Section (Volatile)
-    const currentMinutePacketSection = `<current_minute_packet>
-BPM: (cur/avg/max/min) ${summary.smoothedHR}/${summary.avg}/${summary.max}/${summary.min}
+    const currentMinutePacketSection = `current_minute_packet:
+BPM: ${summary.smoothedHR}
 Coaching Direction: ${summary.coachingDirection}
-Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : ""}
-</current_minute_packet>`;
+Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : ""}${packetExtras}`;
 
     // 8. Milestone Section (Conditional) - already prepared earlier
     
     let narrativeMissionPlanSection = "";
     if (narrativeMissionPlanRef.current?.parsedValue) {
-        const pv = narrativeMissionPlanRef.current.parsedValue;
-        narrativeMissionPlanSection = `<narrative_mission_plan>
-[THEME]: ${pv.theme || "N/A"}
-[MAGUFFIN]: ${pv.maguffin || "N/A"}
-[ANTAGONIST]: ${pv.antagonist || "N/A"}
-[PROTAGONIST]: ${pv.protagonist || "N/A"}
-</narrative_mission_plan>`;
+        narrativeMissionPlanSection = generateRandomizedNarrativeSection(
+            narrativeMissionPlanRef.current.parsedValue,
+            summary.importance || 1
+        );
     }
     
     const prompt = `${taskSection}\n\n${personaSection}\n\n${narrativeMissionPlanSection ? `${narrativeMissionPlanSection}\n\n` : ""}${milestoneSection ? `${milestoneSection}\n\n` : ""}${shortTermContextSection}\n\n${currentMinutePacketSection}`;
@@ -1882,6 +1880,9 @@ Importance: ${summary.importance}${summary.safetyAlert ? "\nSafety Flag: ON" : "
       addLog(`AI_REQUEST [${selectedModel}]: Analyzing for goal: "${currentObjective.title}" as "${selectedPersona}"...`);
       if (summary.sessionState === SessionState.WARMUP) {
           addLog(`SYSTEM: Active State matches WARMUP. Injecting state-specific warmup instruction.`);
+      }
+      if (isFinalMilestoneActive) {
+          addLog(`SYSTEM: Active Milestone matches FINAL MILESTONE. Injecting final milestone custom instructions.`);
       }
       if (narrativeMissionPlanRef.current?.parsedValue) {
           const pv = narrativeMissionPlanRef.current.parsedValue;
