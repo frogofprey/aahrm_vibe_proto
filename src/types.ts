@@ -111,6 +111,20 @@ export interface TrainingObjective {
   recoveryGoal: string;
 }
 
+export interface VerbalTicOption {
+  value: string;
+  weight: number; // e.g. 0.8 for Meow, 0.2 for Nyaa
+}
+
+export interface VerbalTicConfig {
+  id: string;
+  label: string;
+  instruction: string;
+  probability?: number;         // Occurrence probability (0 to 1), if omitted or 1.0 it is "always on"
+  variants?: VerbalTicOption[]; // Dynamic options weighted relative to each other
+  critProbability?: number;     // Active crit chance (0 to 1), e.g. 0.05 for 5% double cast
+}
+
 export interface PersonaConfig {
   systemInstruction: string;
   missionProfile: string;
@@ -118,4 +132,5 @@ export interface PersonaConfig {
   voiceName: string;
   ttsBaselineInstruction: string;
   iterationBrevityDriver: string;
+  verbalTics?: VerbalTicConfig[];
 }

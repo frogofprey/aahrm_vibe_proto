@@ -7,7 +7,7 @@ import HeartRateChart from './components/HeartRateChart';
 import StatusBadge from './components/StatusBadge';
 import DebugLog from './components/DebugLog';
 import AggregatorPanel from './components/AggregatorPanel';
-import { personalityData } from './personality';
+import { personalityData, resolveVerbalTic } from './personality';
 import { TRAINING_OBJECTIVES } from './training_objectives';
 import { generateMissionPlanTemplate } from './services/missionPlanGenerator';
 import { generateRandomizedNarrativeSection } from './narrativeRandomizer';
@@ -179,6 +179,43 @@ const App: React.FC = () => {
       return (stored && PERSONA_CONFIG[stored]) ? stored : 'Arlie';
   });
   const [chattiness, setChattiness] = useState(() => parseInt(localStorage.getItem(STORAGE_KEYS.CHATTINESS) || String(ENV_DEFAULT_CHATTINESS)));
+  
+  // New: Enabled Verbal Tics Configuration
+  const [enabledTics, setEnabledTics] = useState<Record<string, Record<string, boolean>>>(() => {
+    try {
+      const stored = localStorage.getItem('aahrc_enabled_tics');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    const initial: Record<string, Record<string, boolean>> = {};
+    Object.entries(PERSONA_CONFIG).forEach(([key, config]) => {
+      initial[key] = {};
+      if (config.verbalTics) {
+        config.verbalTics.forEach(tic => {
+          initial[key][tic.id] = true;
+        });
+      }
+    });
+    return initial;
+  });
+
+  const toggleTic = useCallback((personaId: string, ticId: string) => {
+    setEnabledTics(prev => {
+      const currentPersonaTics = prev[personaId] || {};
+      const updated = {
+        ...prev,
+        [personaId]: {
+          ...currentPersonaTics,
+          [ticId]: !(currentPersonaTics[ticId] ?? true)
+        }
+      };
+      localStorage.setItem('aahrc_enabled_tics', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
   
   // New: Telemetry Abstraction Setting
   const [isTelemetryAbstractionEnabled, setIsTelemetryAbstractionEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.ABSTRACTION) !== 'false');
@@ -1574,6 +1611,18 @@ You are encouraged to reference the Mission Parameter naturally to set the stage
 Identity: ${personaIdentity}
 </persona>`;
 
+    let verbalTicsSection = "";
+    if (personaConfig.verbalTics) {
+        const activeTics = personaConfig.verbalTics
+            .filter(tic => (enabledTics[selectedPersona]?.[tic.id] ?? true))
+            .map(tic => resolveVerbalTic(tic))
+            .filter((instr): instr is string => instr !== null)
+            .map(instr => `- ${instr}`);
+        if (activeTics.length > 0) {
+            verbalTicsSection = `verbal_tics:\n${activeTics.join("\n")}`;
+        }
+    }
+
     const missionProfileSection = `<mission_profile>
 Goal: ${currentObjective.title}
 ${activityContext}
@@ -1588,7 +1637,7 @@ ${narrativeMissionPlanRef.current.text}
 ${objectivesContext}
 </objective_tracker>`;
 
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}${narrativeMissionPlanSection}\n\n${objectiveTrackerSection}`;
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${verbalTicsSection ? `${verbalTicsSection}\n\n` : ""}${missionProfileSection}${narrativeMissionPlanSection}\n\n${objectiveTrackerSection}`;
 
     try {
       addLog(`AI_REQUEST: Generating intro for "${selectedPersona}"...`);
@@ -1627,7 +1676,7 @@ ${objectivesContext}
     } catch (e) {
          addLog(`AI_ERROR: Intro generation failed. ${e instanceof Error ? e.message : ''}`);
     }
-  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, selectedModel]);
+  }, [selectedPersona, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, isVoiceEnabled, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, selectedModel, enabledTics]);
 
   const generateFinalSessionReport = useCallback(async (finalDuration: string) => {
     const summaries = allSessionSummariesRef.current;
@@ -1681,6 +1730,18 @@ The workout session has ended. Generate a final session report based on the cont
 Identity: ${personaIdentity}
 </persona>`;
 
+    let verbalTicsSection = "";
+    if (personaConfig.verbalTics) {
+        const activeTics = personaConfig.verbalTics
+            .filter(tic => (enabledTics[selectedPersona]?.[tic.id] ?? true))
+            .map(tic => resolveVerbalTic(tic))
+            .filter((instr): instr is string => instr !== null)
+            .map(instr => `- ${instr}`);
+        if (activeTics.length > 0) {
+            verbalTicsSection = `verbal_tics:\n${activeTics.join("\n")}`;
+        }
+    }
+
     const missionProfileSection = `<mission_profile>
 Goal: ${currentObjective.title}
 ${activityContext}
@@ -1710,7 +1771,7 @@ ${transitionHistory}
 Last Minute Insight: ${lastSummary.insight || "N/A"}
 </short_term_context>`;
 
-    const prompt = `${taskSection}\n\n${personaSection}\n\n${missionProfileSection}\n\n${sessionStatsSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${shortTermContextSection}`;
+    const prompt = `${taskSection}\n\n${personaSection}\n\n${verbalTicsSection ? `${verbalTicsSection}\n\n` : ""}${missionProfileSection}\n\n${sessionStatsSection}\n\n${objectiveTrackerSection}\n\n${transitionHistorySection}\n\n${shortTermContextSection}`;
 
     try {
         addLog(`AI_REQUEST: Generating Final Session Report...`);
@@ -1752,7 +1813,7 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     } catch (e) {
         addLog(`AI_ERROR: Final report generation failed.`);
     }
-  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal, selectedModel, selectedTtsModel]);
+  }, [selectedPersona, currentObjective, addLog, isVoiceEnabled, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, intervalCount, intervalCountGoal, selectedModel, selectedTtsModel, enabledTics]);
 
   const requestAiInsight = useCallback(async (summary: MinuteSummary) => {
     const personaConfig = PERSONA_CONFIG[selectedPersona] || PERSONA_CONFIG["Arlie"];
@@ -1788,12 +1849,10 @@ ${milestoneData.label}: ${milestoneData.narrative}`;
 
     // 1. Task Section (Static)
     const taskSection = `task:
-[GENERAL INSTRUCTIONS]
 ${BASE_SYSTEM_INSTRUCTION
     .replace('{{TELEMETRY_CONSTRAINT}}', abstractionInstruction)
     .replace('{{MILESTONE_CONSTRAINT}}', milestoneInstruction)}
 
-[OUTPUT FORMAT]
 Return your response as plain text narration in the specified persona. Do not include any JSON, labels, or formatting characters.`;
 
     // 2. Persona Section (Static)
@@ -1812,20 +1871,28 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
     const allSummaries = allSessionSummariesRef.current;
     const currentIndex = allSummaries.findIndex(s => s.id === summary.id);
     
-    let historyContext = "";
-    
-    // Last 3 summaries (insights only)
-    const last3 = allSummaries.slice(Math.max(0, currentIndex - 3), currentIndex);
-    last3.forEach(s => {
-        if (s.insight) {
-            historyContext += `-${s.insight}\n`;
+    // Build a complete chronological ordered list of all responses output to the user so far
+    const responseHistory: { type: 'intro' | 'insight'; text: string }[] = [];
+    if (sessionIntroRef.current && sessionIntroRef.current.text) {
+        responseHistory.push({ type: 'intro', text: sessionIntroRef.current.text });
+    }
+    allSummaries.slice(0, currentIndex).forEach(s => {
+        if (s.insight && s.insight.trim()) {
+            responseHistory.push({ type: 'insight', text: s.insight.trim() });
         }
     });
 
-    // Always include Intro for continuity
-    if (sessionIntroRef.current) {
-        historyContext += `-Intro: ${sessionIntroRef.current.text}`;
-    }
+    // Only include the last two responses
+    const last2Responses = responseHistory.slice(-2);
+    
+    let historyContext = "";
+    last2Responses.forEach(resp => {
+        if (resp.type === 'intro') {
+            historyContext += `-Intro: ${resp.text}\n`;
+        } else {
+            historyContext += `-${resp.text}\n`;
+        }
+    });
     // --- HISTORY BUILDER END ---
 
     // 4. Objective Tracker Section (Semi-Volatile)
@@ -1858,11 +1925,23 @@ ${historyContext || "No recent history available."}`;
         packetExtras += `\nFinal Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery.`;
     }
 
+    let ticsText = "";
+    if (personaConfig.verbalTics) {
+        const activeTics = personaConfig.verbalTics
+            .filter(tic => (enabledTics[selectedPersona]?.[tic.id] ?? true))
+            .map(tic => resolveVerbalTic(tic))
+            .filter((instr): instr is string => instr !== null)
+            .map(instr => `- ${instr}`);
+        if (activeTics.length > 0) {
+            ticsText = `\nActive Verbal Tics:\n${activeTics.join("\n")}`;
+        }
+    }
+
     // 7. Current Minute Packet Section (Volatile)
     const currentMinutePacketSection = `current_minute_packet:
 BPM: ${summary.smoothedHR}
 Coaching Direction: ${summary.coachingDirection}
-Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : ""}${packetExtras}`;
+Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : ""}${packetExtras}${ticsText}`;
 
     // 8. Milestone Section (Conditional) - already prepared earlier
     
@@ -1960,7 +2039,7 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
         s.id === summary.id ? { ...s, insight: "Analysis failed.", isAnalyzing: false, prompt } : s
       ));
     }
-  }, [selectedPersona, selectedModel, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity, hrTrend, chattiness]);
+  }, [selectedPersona, selectedModel, currentObjective, sessionDurationGoal, intervalTime, intervalCountGoal, addLog, speakInsight, generateContentWithRetry, isTelemetryAbstractionEnabled, isActivityVerbalizationEnabled, selectedActivity, customActivity, hrTrend, chattiness, enabledTics]);
 
   const calculateMinuteSummary = useCallback(() => {
     const values = [...currentMinuteRef.current];
@@ -2660,9 +2739,31 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
 
               <div className="flex flex-col">
                 <label className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-1">Personality</label>
-                <select value={selectedPersona} onChange={(e) => setSelectedPersona(e.target.value)} className="bg-black border border-white/10 text-amber-500 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/50 transition-colors appearance-none cursor-pointer w-32">
-                  {Object.keys(PERSONA_CONFIG).map(k => <option key={k} value={k}>{k}</option>)}
-                </select>
+                <div className="flex items-center gap-3">
+                  <select value={selectedPersona} onChange={(e) => setSelectedPersona(e.target.value)} className="bg-black border border-white/10 text-amber-500 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-amber-500/50 transition-colors appearance-none cursor-pointer w-32">
+                    {Object.keys(PERSONA_CONFIG).map(k => <option key={k} value={k}>{k}</option>)}
+                  </select>
+                  
+                  {PERSONA_CONFIG[selectedPersona]?.verbalTics && (
+                    <div className="flex items-center gap-2 border border-white/5 bg-black/40 px-2 py-1.5 rounded animate-in fade-in duration-300">
+                      <span className="text-[9px] uppercase tracking-wider text-slate-500 font-mono font-bold mr-1">Tics:</span>
+                      {PERSONA_CONFIG[selectedPersona].verbalTics.map(tic => {
+                        const isEnabled = enabledTics[selectedPersona]?.[tic.id] ?? true;
+                        return (
+                          <label key={tic.id} className="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-300 hover:text-white transition-colors" title={tic.instruction}>
+                            <input 
+                              type="checkbox" 
+                              checked={isEnabled} 
+                              onChange={() => toggleTic(selectedPersona, tic.id)}
+                              className="accent-amber-500 cursor-pointer h-3 w-3 bg-black border border-white/10 rounded-sm" 
+                            />
+                            <span className="font-mono text-[10px]">{tic.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col">
