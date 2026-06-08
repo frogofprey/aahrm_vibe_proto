@@ -25,7 +25,7 @@ For each minute:
 *   **Heart Rate**: Average and Max BPM.
 *   **Metrics**: Calories and Heart Points accumulated in that minute.
 *   **State**: The session state (e.g., `WARMUP`, `MAIN_ACTIVE`).
-*   **Saliency Score**: Urgency level (1-10).
+*   **Importance Score**: App-calculated urgency/relevance level (1-10).
 *   **Coaching Directive**: Short, actionable instruction (e.g., "SPEED UP").
 *   **Coach**: The specific feedback/insight provided by the AI for that minute.
 

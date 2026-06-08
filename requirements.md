@@ -55,10 +55,10 @@
     *   Heart Points Earned
     *   Calculated Urgency/Importance (1-10)
     *   Compliance: X/Y **Performance Minutes**
-        *   **History Precision**: The `<short_term_context>` maintains the last **3 minutes** of feedback/insights and the initial session intro for continuity and token efficiency.
+        *   **History Precision**: The `short_term_context` maintains the last 2 chronological responses (session intro and/or previous coaching insights) for continuity and token efficiency.
         *   **Live Telemetry**: Include the **Current BPM** (Smoothed) at the time of trigger alongside minute metrics.
 *   **AI Analysis**: Send the Minute Packet (plus Short-Term History context) to the selected LLM model (defaulting to `gemma-4-26b-a4b-it`) to generate a concise, goal-oriented coaching insight. The prompt is streamlined to focus on immediate telemetry and narrative immersion:
-    *   **Model Selection**: Users can select from several models including Gemma 4 (26b/31b) and Gemini 3.1 Flash (Lite/Full) via a UI selector.
+    *   **Model Selection**: Users can select from several models including Gemma 4 (26b/31b), Gemini 3.1 Flash (Lite/Full), and local Ollama models via a UI selector.
     *   **Thinking Mode**: For models that support "Thinking", the level is forced to **MINIMAL** to minimize latency and focus on direct instruction.
     *   **Context Removal**: Redundant blocks like `mission_profile`, `objective_tracker`, `transition_history`, and `current_timers` are omitted from periodic updates to minimize latency and focus the LLM on current telemetry. However, a clean `narrative_mission_plan` section remains to supply key narrative components: the [THEME], [MAGUFFIN], [ANTAGONIST], and [PROTAGONIST] (with the non-protagonist components dynamically randomized/omitted according to the current packet's importance to maximize response variety).
     *   **Current Minute Restructuring**: The `current_minute_packet` provides current coaching HR (Smoothed BPM), coaching direction, and an importance score (e.g., 5/10).
@@ -69,7 +69,6 @@
         *   During `INIT` or `WARMUP`, `Active_Time` is reported as **'WARMING UP'**. The first update is at 1:00.
         *   Upon entering `MAIN_ACTIVE`, `Active_Time` resets to **'0:00'**.
     *   **Cooldown & Delay**: A **25-second cooldown** is enforced between updates. If a `MAIN_ACTIVE` transition update (0:00) occurs too soon after a warmup update, it is delayed but preserves the '0:00' timestamp for narrative continuity.
-    *   **Saliency Scoring**: The AI must provide a Saliency Score (1-10) with each insight to indicate urgency/novelty (e.g., "Score: [X] | [Insight]").
 *   **Persona**: The AI must adopt one of the configurable personas, tailoring advice to the user's specific "Training Objective". Supported Personas:
     *   **Arlie** (Tactical/Military, Voice: Zebenelgenubi)
     *   **Eara** (Space/Sci-Fi, Voice: Charon)

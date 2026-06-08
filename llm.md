@@ -94,8 +94,8 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: Contains up to the **last 2 chronological responses** (can include the session intro if it's within the last two responses; otherwise only the latest insights).
     *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction, Importance, Safety Flag.
-*   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (600 `maxOutputTokens` in `generationConfig`).
-*   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.
+*   **Output**: Plain text coaching narration in the specified persona. (600 `maxOutputTokens` in `generationConfig`).
+*   **Side Effect**: Triggers **TTS Synthesis** *only if* the app-calculated `Importance` score >= User's configured Voice Threshold (Squelch).
 
 ---
 
@@ -178,10 +178,10 @@ sequenceDiagram
         App->>App: Aggregate Minute Telemetry
         activate App
         App->>AI: Request Minute Insight (w/ History & Context)
-        AI-->>App: JSON (Insight + Score + Directive)
+        AI-->>App: Persona Coaching Text
         
-        alt saliency_score >= Voice Threshold
-            App->>TTS: Synthesize persona_narrative
+        alt Importance >= Voice Threshold
+            App->>TTS: Synthesize Coaching Text
             TTS-->>App: Audio Buffer
         end
         deactivate App

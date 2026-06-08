@@ -19,7 +19,6 @@ Defines the core logic and output requirements. This is the most static part of 
     - **Milestones**: Instructions for incorporating narrative events from the `milestone` section when present.
     - **Warmup State Specific Instruction (Conditional)**: Active only in the `WARMUP` state, prompting the coach to acknowledge and encourage warming up.
     - **Goal**: Instructions to focus on pace steering and milestone updates.
-    - **Saliency Scoring**: Requirements for the 1-10 urgency score.
 - **Output Format**: Strict requirement to return ONLY the persona narration text as plain text. No JSON or markdown.
 - **Markdown Constraint**: Hard constraint to NOT use markdown in the final output.
 
