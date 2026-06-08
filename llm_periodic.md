@@ -7,6 +7,8 @@ Defines the core logic and output requirements. This is the most static part of 
 **Constraint**: 600 `maxOutputTokens` in `generationConfig`.
 **Model**: User-selected (Gemma/Gemini) with `ThinkingLevel.MINIMAL`.
 
+*Note: Clean-form inline instructions are used without explicit structural headers like `[GENERAL INSTRUCTIONS]` or `[OUTPUT FORMAT]`.*
+
 - **General Instructions**: 
     - **Data Input**: How to interpret the telemetry, importance, and safety metrics in `current_minute_packet`.
     - **PII Isolation**: Prohibition on guessing user identity.
@@ -41,7 +43,7 @@ Provides a randomized selection of narrative context elements extracted from the
 Conditional block populated only when a narrative event is active for the current packet. Placed directly after the `narrative_mission_plan` section. Includes the event title and narrative context (excludes the timing/timestamp). If this represents the final milestone of the main session, an explicit instruction is appended: "Final Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery."
 
 ## 5. Short-Term Context Section (`short_term_context:`)
-Maintains continuity by providing the immediate past (previous 3 minutes of feedback/insights) and the initial session intro narrative.
+Maintains continuity and prevents word repetition by supplying exactly the last 2 chronological responses to the user (e.g., the session intro and/or previous minute insights, chronologically ordered). If the session intro is no longer one of the last two responses, it is excluded to avoid over-anchoring.
 
 ## 6. Current Minute Packet Section (`current_minute_packet:`)
 Streamlined real-time telemetry and coaching direction.

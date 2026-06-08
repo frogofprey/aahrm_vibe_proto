@@ -12,10 +12,14 @@ The application allows users to select their preferred model via a pulldown in t
 3.  **Gemini 3.1 Flash Lite**
 4.  **Gemini 3.1 Flash**
 5.  **Gemma 4 e2b (Local)** - Connects to local Ollama model `gemma4:e2b` at `http://localhost:11434`
-6.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
+6.  **Gemma 4 e2b QAT (Local)** - Connects to local Ollama model `gemma4:e2b-it-qat` at `http://localhost:11434`
+7.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
+8.  **Gemma 4 e4b QAT (Local)** - Connects to local Ollama model `gemma4:e4b-it-qat` at `http://localhost:11434`
+9.  **Gemma 4 12b (Local)** - Connects to local Ollama model `gemma4:12b` at `http://localhost:11434`
+10. **Gemma 4 12b QAT (Local)** - Connects to local Ollama model `gemma4:12b-it-qat` at `http://localhost:11434`
 
 **Local Ollama Integration**:
-When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps `gemma-4-e2b` to `gemma4:e2b` and `gemma-4-e4b` to `gemma4:latest`. This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions. For local models, a top-level `"think": "low"` property is injected, and the output token limit (`num_predict`) is padded by a factor of 1.50 to support offline generation depth.
+When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps local options dynamically to Ollama model names (such as `gemma4:e2b`, `gemma4:e2b-it-qat`, `gemma4:latest`, `gemma4:e4b-it-qat`, `gemma4:12b`, and `gemma4:12b-it-qat`). This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions. For local models, a top-level `"think": "low"` property is injected, and the output token limit (`num_predict`) is padded by a factor of 1.50 to support offline generation depth.
 
 **Key Parameters**:
 *   **Thinking Level / Mode**: API models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses. Local models utilize the explicit `"think": "low"` configuration at the root request level.
@@ -79,7 +83,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Trigger**: Every 60 seconds (triggered by wall-clock time accumulation).
 *   **Purpose**: Immediate coaching feedback on the last minute of performance.
 *   **Dependencies**: Requires at least 1 minute of telemetry.
-*   **Structure**: The prompt is structured hierarchically using XML-like tags (e.g., `<task>`, `<persona>`, `<narrative_mission_plan>`, `<short_term_context>`, `<current_minute_packet>`), ordered from static to volatile data.
+*   **Structure**: The prompt is structured hierarchically using labeled sections with colons (e.g., `task:`, `persona:`, `narrative_mission_plan:`, `short_term_context:`, `current_minute_packet:`), ordered from static to volatile data.
 *   **Context/Input**:
     *   **Persona**: Tailored system instruction.
     *   **Narrative Mission Plan**: Extracted elements (Theme, Maguffin, Antagonist, Protagonist) to preserve narrative context.
@@ -88,7 +92,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Activity Context** (Conditional).
     *   **Transition History**: Log of all state changes within the session.
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
-    *   **Short-Term History**: The specific metrics of the *previous* 2 minutes (for continuity).
+    *   **Short-Term History**: Contains up to the **last 2 chronological responses** (can include the session intro if it's within the last two responses; otherwise only the latest insights).
     *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction, Importance, Safety Flag.
 *   **Output**: A JSON object containing a saliency score, coaching directive, persona narrative, and TTS instructions. (600 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the `saliency_score` >= User's configured Voice Threshold.

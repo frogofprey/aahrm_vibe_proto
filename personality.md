@@ -11,6 +11,20 @@ The root object is a Dictionary (Key-Value pair) where:
 ## Schema Definition
 
 ```typescript
+interface VerbalTicOption {
+  value: string;
+  weight: number;              // Dynamic variant weighting relative to each other (e.g. 0.8 for "Meow", 0.2 for "Nyaa")
+}
+
+interface VerbalTicConfig {
+  id: string;
+  label: string;
+  instruction: string;
+  probability?: number;         // Occurrence probability (0 to 1), if omitted or 1.0 it is "always on"
+  variants?: VerbalTicOption[]; // Dynamic options weighted relative to each other for randomized outputs
+  critProbability?: number;     // Active crit chance (0 to 1), e.g. 0.05 for 5% double cast probability
+}
+
 interface PersonaConfig {
   /**
    * The core system instruction defining the AI's personality, backstory, 
@@ -46,18 +60,42 @@ interface PersonaConfig {
    * responses during the session.
    */
   iterationBrevityDriver: string;
+
+  /**
+   * Optional list of dynamic triggers/sound configurations loaded for the persona.
+   */
+  verbalTics?: VerbalTicConfig[];
 }
 ```
 
 ## Example Entry
 
 ```json
-"Arlie": {
-  "systemInstruction": "You are Arlie, a hardened space marine combat trainer...",
-  "missionProfile": "You consider this session a military defense...",
-  "missionWeight": 0.4,
-  "voiceName": "Zebenelgenubi",
-  "ttsBaselineInstruction": "Use a deep, gravelly, authoritative delivery...",
-  "iterationBrevityDriver": "Keep reports tactical and brief. Focus on mission status."
+"Ginger-Chan": {
+  "systemInstruction": "You are Ginger-Chan, an AI Cat-Girl vtuber...",
+  "missionProfile": "You view the session as a video game boss battle...",
+  "missionWeight": 0.7,
+  "voiceName": "Leda",
+  "ttsBaselineInstruction": "Use a high-pitched, bubbly, and hyper-energetic delivery...",
+  "iterationBrevityDriver": "Every update MUST be a rapid, single-breath callout...",
+  "verbalTics": [
+    {
+      "id": "ginger_meow_nya",
+      "label": "Meow/Nya Sounds",
+      "instruction": "Include happy cat-girl verbal sounds in your response.",
+      "probability": 1.0,
+      "critProbability": 0.05,
+      "variants": [
+        { "value": "Meow", "weight": 0.8 },
+        { "value": "Nyaa", "weight": 0.2 }
+      ]
+    },
+    {
+      "id": "ginger_cat_puns",
+      "label": "Cat Puns",
+      "instruction": "Incorporate feline/cat puns naturally.",
+      "probability": 0.80
+    }
+  ]
 }
 ```

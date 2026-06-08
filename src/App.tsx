@@ -1073,12 +1073,24 @@ const App: React.FC = () => {
       const startTime = performance.now();
 
       // Check if it's a local Ollama model
-      const isLocalModel = model === 'gemma-4-e2b' || model === 'gemma-4-e4b';
+      const isLocalModel = model === 'gemma-4-e2b' || model === 'gemma-4-e4b' || model === 'gemma-4-12b' ||
+                           model === 'gemma-4-e2b-qat' || model === 'gemma-4-e4b-qat' || model === 'gemma-4-12b-qat';
 
       if (isLocalModel) {
           const baseUrl = localOllamaUrl.trim().replace(/\/+$/, '') || 'http://localhost:11434';
           const localUrl = `${baseUrl}/api/generate`;
-          const ollamaModelName = model === 'gemma-4-e2b' ? 'gemma4:e2b' : 'gemma4:latest';
+          let ollamaModelName = 'gemma4:e2b';
+          if (model === 'gemma-4-e4b') {
+              ollamaModelName = 'gemma4:latest';
+          } else if (model === 'gemma-4-12b') {
+              ollamaModelName = 'gemma4:12b';
+          } else if (model === 'gemma-4-e2b-qat') {
+              ollamaModelName = 'gemma4:e2b-it-qat';
+          } else if (model === 'gemma-4-e4b-qat') {
+              ollamaModelName = 'gemma4:e4b-it-qat';
+          } else if (model === 'gemma-4-12b-qat') {
+              ollamaModelName = 'gemma4:12b-it-qat';
+          }
           addLog(`${logPrefix}: Routing to local Ollama [${ollamaModelName}] at ${localUrl}...`);
           try {
               const res = await fetch(localUrl, {
@@ -2775,9 +2787,14 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
                     <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
                     <option value="gemini-3.1-flash">Gemini 3.1 Flash</option>
                     <option value="gemma-4-e2b">Gemma 4 e2b (Local)</option>
+                    <option value="gemma-4-e2b-qat">Gemma 4 e2b QAT (Local)</option>
                     <option value="gemma-4-e4b">Gemma 4 e4b (Local)</option>
+                    <option value="gemma-4-e4b-qat">Gemma 4 e4b QAT (Local)</option>
+                    <option value="gemma-4-12b">Gemma 4 12b (Local)</option>
+                    <option value="gemma-4-12b-qat">Gemma 4 12b QAT (Local)</option>
                   </select>
-                  {(selectedModel === 'gemma-4-e2b' || selectedModel === 'gemma-4-e4b') && (
+                  {(selectedModel === 'gemma-4-e2b' || selectedModel === 'gemma-4-e4b' || selectedModel === 'gemma-4-12b' ||
+                    selectedModel === 'gemma-4-e2b-qat' || selectedModel === 'gemma-4-e4b-qat' || selectedModel === 'gemma-4-12b-qat') && (
                     <input
                       type="text"
                       value={localOllamaUrl}
