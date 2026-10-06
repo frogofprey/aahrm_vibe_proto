@@ -231,7 +231,13 @@ const App: React.FC = () => {
   const [isActivityVerbalizationEnabled, setIsActivityVerbalizationEnabled] = useState(() => localStorage.getItem(STORAGE_KEYS.ACTIVITY_VERBALIZATION) !== 'false');
   const [selectedActivity, setSelectedActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.SELECTED_ACTIVITY) || 'walking');
   const [customActivity, setCustomActivity] = useState(() => localStorage.getItem(STORAGE_KEYS.CUSTOM_ACTIVITY) || '');
-  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(STORAGE_KEYS.AI_MODEL) || 'gemma-4-26b-a4b-it');
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.AI_MODEL);
+    if (saved === 'gemini-3.1-flash' || saved === 'gemini-3.1-flash-lite') {
+      return 'gemini-3.8-flash';
+    }
+    return saved || 'gemma-4-26b-a4b-it';
+  });
   const [localOllamaUrl, setLocalOllamaUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.OLLAMA_URL) || 'http://localhost:11434');
   const [selectedTtsModel, setSelectedTtsModel] = useState(() => localStorage.getItem(STORAGE_KEYS.TTS_MODEL) || 'gemini-2.5-flash-preview-tts');
   const [pocketTtsUrl, setPocketTtsUrl] = useState(() => localStorage.getItem(STORAGE_KEYS.POCKET_TTS_URL) || 'http://localhost:8000/');
@@ -283,6 +289,7 @@ const App: React.FC = () => {
   const lastPerformanceTickRef = useRef<number>(0);
   const pendingAiMarkerRef = useRef(false);
   const hasSentFirstMainActiveInsightRef = useRef(false);
+  const pendingRecoveryTransitionRef = useRef(false);
   const lastMilestoneCheckSecondRef = useRef<number>(-1);
   const consecutiveMaintainCountRef = useRef<number>(0);
   const workerRef = useRef<Worker | null>(null);
@@ -400,6 +407,11 @@ const App: React.FC = () => {
                 setIntervalCount(prev => prev + 1);
                 addLog(`SYSTEM: Interval ${intervalCount + 1} completed.`);
             }
+        }
+
+        // Mark recovery transition prompt flag for the next periodic message
+        if (newState === SessionState.RECOVERY) {
+            pendingRecoveryTransitionRef.current = true;
         }
 
         // Update Actual State
@@ -1145,19 +1157,28 @@ const App: React.FC = () => {
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-      // Ensure thinking mode is off for models that support it
-      // Default to MINIMAL thinking level to minimize latency and meet user request
-      const configWithNoThinking = {
-          ...generationConfig,
-          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL }
-      };
+      // Online Flash models (3.7, 3.8, and 3.5 lite) do not support ThinkingLevel.MINIMAL (causes 400 error)
+      // and token limits (maxOutputTokens) are removed to avoid truncation issues.
+      const isOnlineFlashModel = model === 'gemini-3.7-flash' ||
+                                 model === 'gemini-3.8-flash' ||
+                                 model === 'gemini-3.5-flash-lite' ||
+                                 model.includes('flash');
+
+      const resolvedConfig = { ...generationConfig };
+      if (isOnlineFlashModel) {
+          delete resolvedConfig.maxOutputTokens;
+          // Set to LOW thinking level (minimum supported for 3.7/3.8/3.5 Lite) to suppress thought token overhead
+          resolvedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
+      } else {
+          resolvedConfig.thinkingConfig = { thinkingLevel: ThinkingLevel.MINIMAL };
+      }
 
       while (true) {
           try {
               const response = await ai.models.generateContent({ 
                   model, 
                   contents, 
-                  config: configWithNoThinking 
+                  config: resolvedConfig 
               });
               const durationMs = performance.now() - startTime;
               return { response, durationMs };
@@ -1189,14 +1210,22 @@ const App: React.FC = () => {
     const voiceName = personaConfig.voiceName;
     
     // Use baseline TTS instruction or custom one from LLM
-    const ttsBase = (typeof customTtsInstruction === 'string' ? customTtsInstruction : undefined) || personaConfig.ttsBaselineInstruction;
+    const ttsBase = (typeof customTtsInstruction === 'string' && customTtsInstruction.trim())
+      ? customTtsInstruction.trim()
+      : personaConfig.ttsBaselineInstruction;
 
-    // Clean instructions and payload: remove colons and semicolons
-    const cleanTtsBase = ttsBase.replace(/[:;]/g, '');
-    const cleanPayload = text.replace(/[:;]/g, '');
+    // Clean any trailing colons/semicolons from the instruction
+    const cleanTtsInstruction = ttsBase.replace(/[:;]+$/, '').trim();
 
-    // Ensure a single colon between instruction and payload
-    const finalTtsPrompt = `${cleanTtsBase}: ${cleanPayload}`;
+    // Format style directive for speechMetadata.style (Gemini 3.8 models)
+    const styleContent = cleanTtsInstruction.startsWith('Style:')
+      ? cleanTtsInstruction
+      : `Style: ${cleanTtsInstruction.replace(/^Style\s*:\s*/i, '')}`;
+
+    // Format legacy colon-delimited prompt for older models: "<cleanInstruction>: <cleanPayload>"
+    const cleanTtsBaseLegacy = ttsBase.replace(/^Style:\s*/i, '').replace(/[:;]+$/, '').trim();
+    const cleanPayload = text.replace(/[:;]/g, '').trim();
+    const finalTtsPrompt = `${cleanTtsBaseLegacy}: ${cleanPayload}`;
 
     const maxRetries = 1; // Total attempts = 1 initial + 1 retry
     let attempt = 0;
@@ -1273,21 +1302,111 @@ const App: React.FC = () => {
           const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
           addLog(`VOICE: ${networkTimeStr} ${audioDurationStr}`);
         } else {
-          addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
-          
-          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-          const response = await ai.models.generateContent({
-            model: currentTtsModel,
-            contents: [{ parts: [{ text: finalTtsPrompt }] }],
-            config: {
-              responseModalities: [Modality.AUDIO],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: { voiceName: voiceName },
+          const is38TtsModel = currentTtsModel.includes('3.8');
+          addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})${is38TtsModel ? ' [speechMetadata.style]' : ''}...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+
+          const textToSpeak = cleanPayload || text.trim();
+
+          let response: any;
+          if (is38TtsModel) {
+            const reqPayload = {
+              model: currentTtsModel,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    {
+                      text: `## Transcript:\n${textToSpeak}`,
+                      speechMetadata: {
+                        style: styleContent,
+                      },
+                    },
+                  ],
+                },
+              ],
+              generationConfig: {
+                responseModalities: ['AUDIO'],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: {
+                      voiceName: voiceName,
+                    },
+                  },
                 },
               },
-            },
-          });
+            };
+
+            let res: Response | null = null;
+            let lastError = '';
+
+            // Try server-side proxy route first (/api/tts)
+            try {
+              res = await fetch('/api/tts', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(reqPayload),
+              });
+              if (!res.ok) {
+                lastError = `Proxy status ${res.status}: ${await res.text()}`;
+                res = null;
+              }
+            } catch (proxyErr) {
+              lastError = `Proxy failed: ${proxyErr instanceof Error ? proxyErr.message : String(proxyErr)}`;
+              res = null;
+            }
+
+            // Fallback to direct Generative Language API if proxy is unavailable
+            if (!res) {
+              const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+              const cleanModelName = currentTtsModel.replace(/^models\//, '');
+              const apiUrl = apiKey
+                ? `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent?key=${encodeURIComponent(apiKey)}`
+                : `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent`;
+
+              const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+              };
+              if (apiKey) {
+                headers['x-goog-api-key'] = apiKey;
+              }
+
+              res = await fetch(apiUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                  contents: reqPayload.contents,
+                  generationConfig: reqPayload.generationConfig,
+                }),
+              });
+
+              if (!res.ok) {
+                const errText = await res.text();
+                throw new Error(`Gemini TTS API error (${res.status}): ${errText} (Proxy detail: ${lastError})`);
+              }
+            }
+
+            response = await res.json();
+          } else {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            response = await ai.models.generateContent({
+              model: currentTtsModel,
+              contents: [
+                {
+                  parts: [{ text: finalTtsPrompt }],
+                },
+              ],
+              config: {
+                responseModalities: [Modality.AUDIO],
+                speechConfig: {
+                  voiceConfig: {
+                    prebuiltVoiceConfig: { voiceName: voiceName },
+                  },
+                },
+              },
+            });
+          }
           
           const networkTimeMs = performance.now() - startTime;
           const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
@@ -1511,22 +1630,26 @@ ${sessionContext}${activityContext}
           }
 
           // Parsing Narrative Milestones
-          // Look for everything between [TIMELINE] and the next section header [ANY_HEADER] or end of string
-          const timelineRegex = /\[TIMELINE\]:?\s*([\s\S]*?)(?=\n\[|$)/i;
+          // Look for everything between [TIMELINE] and the next section header or end of string
+          const timelineRegex = /(?:\[TIMELINE\]|\*\*\[TIMELINE\]\*\*|#{1,6}\s*\[?TIMELINE\]?):?\s*([\s\S]*?)(?=\n\s*(?:#{1,6}\s*|\*{1,2})?\[|$)/i;
           const timelineMatch = narrativeText.match(timelineRegex);
           const rawTimeline = timelineMatch ? timelineMatch[1].trim() : "";
           const lines = rawTimeline.split('\n').map((l: string) => l.trim()).filter((l: string) => l !== "");
           
           const parsedMilestones: NarrativeMilestone[] = [];
           
-          lines.forEach((line: string) => {
+          lines.forEach((rawLine: string) => {
+              // Strip leading markdown bullets/numbers (e.g. "- ", "* ", "1. ")
+              const cleanedLine = rawLine.replace(/^[-*•\s]+/, '').replace(/^\d+\.\s+/, '').trim();
+              // Strip markdown bold wrappers around timestamp like **0:00**
+              const normalizedLine = cleanedLine.replace(/^\*\*([0-9:]+)\*\*/, '$1');
               // Regex for "M:SS [Label] || Narrative" or "M:SS Label || Narrative"
               // Supporting both bracketed and unbracketed labels, and multiple separators.
-              const lineMatch = line.match(/^(\d+[:\d+]*)\s*(?:\[(.*?)\]|([^:|]+?))\s*(?::|\|+)\s*(.*)$/);
+              const lineMatch = normalizedLine.match(/^(\d+[:\d+]*)\s*(?:\[(.*?)\]|([^:|]+?))\s*(?::|\|+)\s*(.*)$/);
               if (lineMatch) {
                   const timeLabel = lineMatch[1].trim();
-                  const label = (lineMatch[2] || lineMatch[3]).trim();
-                  const narrative = lineMatch[4].trim();
+                  const label = (lineMatch[2] || lineMatch[3]).trim().replace(/^\*+|\*+$/g, '');
+                  const narrative = lineMatch[4].trim().replace(/^\*+|\*+$/g, '');
                   
                   // Convert timeLabel to seconds
                   const parts = timeLabel.split(':').map(Number);
@@ -1546,12 +1669,12 @@ ${sessionContext}${activityContext}
           narrativeMilestonesRef.current = parsedMilestones;
           
           // Parsing additional fields: Theme, Maguffin, Antagonist, Protagonist, Mission Complete, Bonus
-          const themeMatch = narrativeText.match(/\[THEME\]:?\s*(.*)/i);
-          const maguffinMatch = narrativeText.match(/\[MAGUFFIN\]:?\s*(.*)/i);
-          const antagonistMatch = narrativeText.match(/\[ANTAGONIST\]:?\s*(.*)/i);
-          const protagonistMatch = narrativeText.match(/\[PROTAGONIST\]:?\s*(.*)/i);
-          const missionCompleteMatch = narrativeText.match(/\[MISSION COMPLETE\]:?\s*(.*)/i);
-          const bonusMatch = narrativeText.match(/\[BONUS\]:?\s*(.*)/i);
+          const themeMatch = narrativeText.match(/\[THEME\]\*{0,2}:?\s*(.*)/i);
+          const maguffinMatch = narrativeText.match(/\[MAGUFFIN\]\*{0,2}:?\s*(.*)/i);
+          const antagonistMatch = narrativeText.match(/\[ANTAGONIST\]\*{0,2}:?\s*(.*)/i);
+          const protagonistMatch = narrativeText.match(/\[PROTAGONIST\]\*{0,2}:?\s*(.*)/i);
+          const missionCompleteMatch = narrativeText.match(/\[MISSION COMPLETE\]\*{0,2}:?\s*(.*)/i);
+          const bonusMatch = narrativeText.match(/\[BONUS\]\*{0,2}:?\s*(.*)/i);
 
           const parsedValue: ParsedNarrativePlan = {
               theme: themeMatch ? themeMatch[1].trim() : undefined,
@@ -1565,7 +1688,7 @@ ${sessionContext}${activityContext}
           narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage, parsedValue };
           
           if (parsedMilestones.length > 0) {
-              addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES ---`);
+              addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES (${parsedMilestones.length}) ---`);
               parsedMilestones.forEach(m => {
                   addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}`);
               });
@@ -1576,6 +1699,8 @@ ${sessionContext}${activityContext}
               if (parsedValue.missionComplete) addLog(`  [COMPLETE] ${parsedValue.missionComplete}`);
               if (parsedValue.bonus) addLog(`  [BONUS] ${parsedValue.bonus}`);
               addLog(`SYSTEM: -----------------------------------------`);
+          } else {
+              addLog(`SYSTEM: WARNING: Narrative plan generated but 0 milestones could be parsed from timeline.`);
           }
 
       } catch (e) {
@@ -1937,6 +2062,15 @@ ${historyContext || "No recent history available."}`;
         packetExtras += `\nFinal Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery.`;
     }
 
+    let isRecoveryTransition = false;
+    if (pendingRecoveryTransitionRef.current) {
+        isRecoveryTransition = true;
+        summary.coachingDirection = "Maintain";
+        summary.importance = 6;
+        packetExtras += `\nRecovery Transition: The user has successfully cooled down and the session is complete. Clearly announce that the workout is finished and they can stop whenever they like. Celebrate the victory and the [MAGUFFIN] briefly`;
+        pendingRecoveryTransitionRef.current = false;
+    }
+
     let ticsText = "";
     if (personaConfig.verbalTics) {
         const activeTics = personaConfig.verbalTics
@@ -1949,11 +2083,14 @@ ${historyContext || "No recent history available."}`;
         }
     }
 
+    const coachingDir = isRecoveryTransition ? "Maintain" : summary.coachingDirection;
+    const packetImportance = isRecoveryTransition ? 6 : summary.importance;
+
     // 7. Current Minute Packet Section (Volatile)
     const currentMinutePacketSection = `current_minute_packet:
 BPM: ${summary.smoothedHR}
-Coaching Direction: ${summary.coachingDirection}
-Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : ""}${packetExtras}${ticsText}`;
+Coaching Direction: ${coachingDir}
+Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : ""}${packetExtras}${ticsText}`;
 
     // 8. Milestone Section (Conditional) - already prepared earlier
     
@@ -1961,8 +2098,11 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
     if (narrativeMissionPlanRef.current?.parsedValue) {
         narrativeMissionPlanSection = generateRandomizedNarrativeSection(
             narrativeMissionPlanRef.current.parsedValue,
-            summary.importance || 1
+            packetImportance || 1
         );
+        if (isRecoveryTransition && narrativeMissionPlanRef.current.parsedValue.maguffin && !narrativeMissionPlanSection.includes('[MAGUFFIN]')) {
+            narrativeMissionPlanSection += `\n[MAGUFFIN]: ${narrativeMissionPlanRef.current.parsedValue.maguffin}`;
+        }
     }
     
     const prompt = `${taskSection}\n\n${personaSection}\n\n${narrativeMissionPlanSection ? `${narrativeMissionPlanSection}\n\n` : ""}${milestoneSection ? `${milestoneSection}\n\n` : ""}${shortTermContextSection}\n\n${currentMinutePacketSection}`;
@@ -1974,6 +2114,9 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
       }
       if (isFinalMilestoneActive) {
           addLog(`SYSTEM: Active Milestone matches FINAL MILESTONE. Injecting final milestone custom instructions.`);
+      }
+      if (isRecoveryTransition) {
+          addLog(`SYSTEM: Active State matches RECOVERY TRANSITION. Injecting recovery transition instructions.`);
       }
       if (narrativeMissionPlanRef.current?.parsedValue) {
           const pv = narrativeMissionPlanRef.current.parsedValue;
@@ -2273,6 +2416,11 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
         importance = 10;
     }
 
+    if (pendingRecoveryTransitionRef.current) {
+        coachingDirection = "Maintain";
+        importance = 6;
+    }
+
     const newSummary: MinuteSummary = {
       id: String(allSessionSummariesRef.current.length + 1),
       timestamp,
@@ -2554,6 +2702,7 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
     activeDurationRef.current = 0;
     hasStartedActiveRef.current = false;
     hasSentFirstMainActiveInsightRef.current = false;
+    pendingRecoveryTransitionRef.current = false;
     lastUpdateWallTimeRef.current = 0;
     lastMilestoneCheckSecondRef.current = -1;
     nextActiveTargetRef.current = 60000;
@@ -2625,6 +2774,7 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
       activeDurationRef.current = 0;
       hasStartedActiveRef.current = false;
       hasSentFirstMainActiveInsightRef.current = false;
+      pendingRecoveryTransitionRef.current = false;
       lastUpdateWallTimeRef.current = now;
       nextActiveTargetRef.current = 60000;
       lastMilestoneCheckSecondRef.current = -1;
@@ -2784,8 +2934,9 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
                   <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="bg-black border border-white/10 text-indigo-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-indigo-400/50 transition-colors appearance-none cursor-pointer w-48">
                     <option value="gemma-4-26b-a4b-it">Gemma 4 26b a4b it</option>
                     <option value="gemma-4-31b-it">Gemma 4 31b it</option>
-                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite</option>
-                    <option value="gemini-3.1-flash">Gemini 3.1 Flash</option>
+                    <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite</option>
+                    <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
+                    <option value="gemini-3.8-flash">Gemini 3.8 Flash</option>
                     <option value="gemma-4-e2b">Gemma 4 e2b (Local)</option>
                     <option value="gemma-4-e2b-qat">Gemma 4 e2b QAT (Local)</option>
                     <option value="gemma-4-e4b">Gemma 4 e4b (Local)</option>
@@ -2819,6 +2970,8 @@ Importance: ${summary.importance}/10${summary.safetyAlert ? "\nSafety Flag: ON" 
                     setSelectedTtsModel(e.target.value);
                     localStorage.setItem(STORAGE_KEYS.TTS_MODEL, e.target.value);
                   }} className="bg-black border border-white/10 text-emerald-400 font-mono text-xs px-3 py-1.5 focus:outline-none focus:border-emerald-400/50 transition-colors appearance-none cursor-pointer w-48">
+                    <option value="gemini-3.8-flash-lite-tts">Gemini 3.8 Flash Lite TTS</option>
+                    <option value="gemini-3.8-flash-tts">Gemini 3.8 Flash TTS</option>
                     <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS Preview</option>
                     <option value="gemini-2.5-flash-preview-tts">Gemini 2.5 Flash Preview TTS</option>
                     <option value="gemini-2.5-pro-preview-tts">Gemini 2.5 Pro Preview TTS</option>

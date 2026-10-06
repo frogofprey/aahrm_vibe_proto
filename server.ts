@@ -19,6 +19,8 @@ async function startServer() {
 
   const PORT = 3000;
 
+  app.use(express.json({ limit: '10mb' }));
+
   // Mock Heart Rate Data Generation
   let currentHeartRate = 72;
   setInterval(() => {
@@ -36,6 +38,35 @@ async function startServer() {
   // API Routes
   app.get('/api/health', (req: express.Request, res: express.Response) => {
     res.json({ status: 'ok', message: 'AetherAegis Biometric Link Active' });
+  });
+
+  app.post('/api/tts', async (req: express.Request, res: express.Response) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+      if (!apiKey) {
+        return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+      }
+      const { model, contents, generationConfig } = req.body;
+      const cleanModel = (model || 'gemini-3.8-flash-lite-tts').replace(/^models\//, '');
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+      const googleRes = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ contents, generationConfig }),
+      });
+
+      const data = await googleRes.json();
+      if (!googleRes.ok) {
+        return res.status(googleRes.status).json(data);
+      }
+      return res.json(data);
+    } catch (err: any) {
+      console.error('[TTS Proxy Error]', err);
+      return res.status(500).json({ error: err.message || 'Server TTS error' });
+    }
   });
 
   // Vite middleware for development

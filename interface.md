@@ -67,8 +67,8 @@ The default screen uses a multi-faceted **Bento Grid** designed to fill a standa
     *   `Age` Input: Numeric value (range: 10-120), triggers zone recomputation instantly.
     *   `Weight` Input: Numeric decimal, drives metabolic calorie burn calculations.
     *   `Gender` Selector: Dropdown setting modifiers for basal profiles.
-    *   `Model` Selector: Dropdown containing available models (`Gemma 4 26b`, `Gemma 4 31b`, `Gemini 3.1 Flash Lite`, `Gemini 3.1 Flash`, plus local Ollama `Gemma 4 e2b` and `Gemma 4 e4b`). If a local OLLAMA model is chosen, a customizable base URL endpoint field displays.
-    *   `TTS Model` Selector: Dropdown containing available TTS models (`Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, `Gemini 2.5 Pro Preview TTS`, `PocketTTS`, and `Kokoro TTS`). If `PocketTTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8000/`). If `Kokoro TTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8800/`).
+    *   `Model` Selector: Dropdown containing available models (`Gemma 4 26b`, `Gemma 4 31b`, `Gemini 3.5 Flash Lite`, `Gemini 3.7 Flash`, `Gemini 3.8 Flash`, plus local Ollama `Gemma 4 e2b`, `Gemma 4 e4b`, `Gemma 4 12b`, and their QAT variants). If a local OLLAMA model is chosen, a customizable base URL endpoint field displays.
+    *   `TTS Model` Selector: Dropdown containing available TTS models (`Gemini 3.8 Flash Lite TTS`, `Gemini 3.8 Flash TTS`, `Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, `Gemini 2.5 Pro Preview TTS`, `PocketTTS`, and `Kokoro TTS`). If `PocketTTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8000/`). If `Kokoro TTS` is selected, a customizable URL endpoint field displays (defaulting to `http://localhost:8800/`).
     *   `Objective` Configurator: Handles training strategy target goals, duration limits, and interval counts.
     *   `Uplink Simulator Toggle`: Injects telemetry data packet sequences when a live heart rate sensor is absent.
 

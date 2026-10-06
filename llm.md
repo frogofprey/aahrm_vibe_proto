@@ -9,21 +9,23 @@ The application allows users to select their preferred model via a pulldown in t
 
 1.  **Gemma 4 26b a4b it** (Default)
 2.  **Gemma 4 31b it**
-3.  **Gemini 3.1 Flash Lite**
-4.  **Gemini 3.1 Flash**
-5.  **Gemma 4 e2b (Local)** - Connects to local Ollama model `gemma4:e2b` at `http://localhost:11434`
-6.  **Gemma 4 e2b QAT (Local)** - Connects to local Ollama model `gemma4:e2b-it-qat` at `http://localhost:11434`
-7.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
-8.  **Gemma 4 e4b QAT (Local)** - Connects to local Ollama model `gemma4:e4b-it-qat` at `http://localhost:11434`
-9.  **Gemma 4 12b (Local)** - Connects to local Ollama model `gemma4:12b` at `http://localhost:11434`
-10. **Gemma 4 12b QAT (Local)** - Connects to local Ollama model `gemma4:12b-it-qat` at `http://localhost:11434`
+3.  **Gemini 3.5 Flash Lite**
+4.  **Gemini 3.7 Flash**
+5.  **Gemini 3.8 Flash**
+6.  **Gemma 4 e2b (Local)** - Connects to local Ollama model `gemma4:e2b` at `http://localhost:11434`
+7.  **Gemma 4 e2b QAT (Local)** - Connects to local Ollama model `gemma4:e2b-it-qat` at `http://localhost:11434`
+8.  **Gemma 4 e4b (Local)** - Connects to local Ollama model `gemma4:latest` at `http://localhost:11434`
+9.  **Gemma 4 e4b QAT (Local)** - Connects to local Ollama model `gemma4:e4b-it-qat` at `http://localhost:11434`
+10. **Gemma 4 12b (Local)** - Connects to local Ollama model `gemma4:12b` at `http://localhost:11434`
+11. **Gemma 4 12b QAT (Local)** - Connects to local Ollama model `gemma4:12b-it-qat` at `http://localhost:11434`
 
 **Local Ollama Integration**:
 When a `Local` model option is chosen, the system automatically redirects LLM prompts to the client-side Ollama server hosted natively at `http://localhost:11434/api/generate`. This maps local options dynamically to Ollama model names (such as `gemma4:e2b`, `gemma4:e2b-it-qat`, `gemma4:latest`, `gemma4:e4b-it-qat`, `gemma4:12b`, and `gemma4:12b-it-qat`). This allows developers and users to run private, offline, low-latency models to test and execute prompt behavior directly on their workstation. Note that standard CORS headers (e.g., `OLLAMA_ORIGINS="*"`) must be configured on the workstation's Ollama configuration to avoid browser sandbox policy restrictions. For local models, a top-level `"think": "low"` property is injected, and the output token limit (`num_predict`) is padded by a factor of 1.50 to support offline generation depth.
 
 **Key Parameters**:
-*   **Thinking Level / Mode**: API models are configured with `ThinkingLevel.MINIMAL` (or equivalent "no thinking" settings) to prioritize low-latency coaching responses. Local models utilize the explicit `"think": "low"` configuration at the root request level.
+*   **Thinking Level / Mode**: Online Flash models (3.7, 3.8, and 3.5 Lite) utilize `thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }`, the lowest allowable thinking tier for 3.x Flash architectures, suppressing internal thought token generation to minimize latency and token consumption. Other API models default to `ThinkingLevel.MINIMAL` where supported, and local Ollama models utilize root-level `"think": "low"`.
 *   **Mission Generation**: Now utilizes the **selected user model** (defaulting to Gemma 4 26b) for narrative planning, ensuring consistency across all session calls.
+*   **Token Limits (`maxOutputTokens`)**: While standard and local models utilize specific token ceilings (e.g., 600–1,536 tokens), token limits are omitted entirely for online Gemini Flash models (3.7, 3.8, and 3.5 Lite) to prevent premature output truncation.
 *   **Audio Synthesis & Selector**: Supports multiple TTS models including Google Gemini's audio-modality models and local PocketTTS endpoints, configured through the Dashboard Header control unit.
 *   **Latency Metrics**: Latency checks (both LLM prompt network duration and TTS synthesis time in milliseconds) are measured, appended directly to the session logging payloads, and displayed live in the user interface.
 
@@ -127,11 +129,13 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
 
 *   **Trigger**: Called by Intro (C), Minute Analysis (D), or Final Report (E).
 *   **Model Options**:
-    1.  **Gemini 3.1 Flash TTS Preview** (`gemini-3.1-flash-tts-preview`) - Native high-fidelity speech synthesis.
-    2.  **Gemini 2.5 Flash Preview TTS** (`gemini-2.5-flash-preview-tts`) - Highly optimized low-latency preview model.
-    3.  **Gemini 2.5 Pro Preview TTS** (`gemini-2.5-pro-preview-tts`) - Sophisticated high-fidelity voice characterization.
-    4.  **PocketTTS** (`pocket-tts`) - Local/offline endpoint.
-    5.  **Kokoro TTS** (`kokoro-tts`) - Local/offline endpoint.
+    1.  **Gemini 3.8 Flash Lite TTS** (`gemini-3.8-flash-lite-tts`) - Native high-throughput speech synthesis.
+    2.  **Gemini 3.8 Flash TTS** (`gemini-3.8-flash-tts`) - Native high-fidelity speech synthesis.
+    3.  **Gemini 3.1 Flash TTS Preview** (`gemini-3.1-flash-tts-preview`) - Native high-fidelity speech synthesis.
+    4.  **Gemini 2.5 Flash Preview TTS** (`gemini-2.5-flash-preview-tts`) - Highly optimized low-latency preview model.
+    5.  **Gemini 2.5 Pro Preview TTS** (`gemini-2.5-pro-preview-tts`) - Sophisticated high-fidelity voice characterization.
+    6.  **PocketTTS** (`pocket-tts`) - Local/offline endpoint.
+    7.  **Kokoro TTS** (`kokoro-tts`) - Local/offline endpoint.
 *   **PocketTTS Dynamic Endpoint**:
     *   Housed at a customizable local URL (defaults to `http://localhost:8000/`).
     *   Requests of audio generation target the standard OpenAI-compliant `/v1/audio/speech` format.
@@ -144,6 +148,7 @@ These calls occur immediately after the user clicks **"STOP SESSION"**.
     *   Text to speak.
     *   `ttsInstruction`: Persona-specific direction (e.g., "Speak fast and manic").
     *   `voiceName`: Specific voice model ID (e.g., 'Kore', 'Puck').
+    *   **Gemini 3.8 TTS Transcript & Style Format**: For Gemini 3.8 models (`gemini-3.8-flash-tts`, `gemini-3.8-flash-lite-tts`), requests use `role: 'user'`, prefix the text with `## Transcript:\n`, and supply the style directive via `speechMetadata.style` (e.g., `{ role: 'user', parts: [{ text: '## Transcript:\n' + text, speechMetadata: { style: 'Style: ...' } }] }`), preventing the model from reading directional instructions aloud. Earlier models retain the prepended instruction format.
 *   **Retry Logic**: Implements 1 retry on 5xx errors; aborts immediately on 429 (Quota Exceeded).
 
 ---

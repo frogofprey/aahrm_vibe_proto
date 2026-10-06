@@ -51,6 +51,8 @@ Streamlined real-time telemetry and coaching direction.
 - **Coaching Direction**: The calculated directive for the user.
 - **Importance**: The calculated urgency for this update, formatted as a fraction of 10 (e.g., 5/10).
 - **Safety Flag**: Explicit alert if safety limits are breached.
+- **Recovery Transition Instruction (Conditional)**: Added exclusively to the first periodic message sent after the user state changes to `RECOVERY` (on this packet, Coaching Direction is set to `Maintain` and Importance is set to `6/10`):
+  `Recovery Transition: The user has successfully cooled down and the session is complete. Clearly announce that the workout is finished and they can stop whenever they like. Celebrate the victory and the [MAGUFFIN] briefly`
 
 ## 7. Output Processing
 The LLM returns plain text which is pre-pended with the baseline TTS instruction and sent to the TTS engine. Voice trigger is gated by the a priori importance score assigned to the telemetry packet.

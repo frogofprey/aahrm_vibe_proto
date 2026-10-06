@@ -48,13 +48,15 @@ Settings are organized into functional groups, easily accessible via a unified *
 *   **Model Selector**: Pull-down containing user-level choices:
     *   `Gemma 4 26b a4b it` (Default, low-latency)
     *   `Gemma 4 31b it`
-    *   `Gemini 3.1 Flash Lite`
-    *   `Gemini 3.1 Flash`
-    *   `Gemma 4 e2b (Local)` (Workstation Ollama offline engine)
-    *   `Gemma 4 e4b (Local)` (Workstation Ollama offline engine)
+    *   `Gemini 3.5 Flash Lite`
+    *   `Gemini 3.7 Flash`
+    *   `Gemini 3.8 Flash`
+    *   `Gemma 4 e2b (Local)` / `Gemma 4 e2b QAT (Local)`
+    *   `Gemma 4 e4b (Local)` / `Gemma 4 e4b QAT (Local)`
+    *   `Gemma 4 12b (Local)` / `Gemma 4 12b QAT (Local)`
     *   *Inputs*: Choosing a local model renders a network address text input to calibrated endpoint connections.
 *   **TTS Model Selector**: Allows custom configuration of speech engines:
-    *   `Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, or `Gemini 2.5 Pro Preview TTS` (high-fidelity cloud options).
+    *   `Gemini 3.8 Flash Lite TTS`, `Gemini 3.8 Flash TTS`, `Gemini 3.1 Flash TTS Preview`, `Gemini 2.5 Flash Preview TTS`, or `Gemini 2.5 Pro Preview TTS` (high-fidelity cloud options).
     *   `PocketTTS` (offline, local OpenAI-compliant `/v1/audio/speech` layout utilizing the custom address input; default voice is `'ginger-chan'`).
     *   `Kokoro TTS` (offline, local OpenAI-compliant `/v1/audio/speech` layout utilizing the custom address input; default model is `"kokoro"` and default voice is `"af_heart"`).
 *   **Chattiness Level Slider**: Controls AI frequency and narrative length (Low, Medium, High).
