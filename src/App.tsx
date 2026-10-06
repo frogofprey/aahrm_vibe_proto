@@ -330,6 +330,8 @@ const App: React.FC = () => {
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isAudioPlayingRef = useRef<boolean>(false);
   const activeSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const activeStreamSourcesRef = useRef<AudioBufferSourceNode[]>([]);
+  const nextStreamPlayTimeRef = useRef<number>(0);
   const processAudioQueueRef = useRef<() => void>(() => {});
 
   // Sync ref
@@ -1236,6 +1238,7 @@ const App: React.FC = () => {
         const isRetry = attempt > 0;
         let audioBuffer: AudioBuffer;
         const currentTtsModel = selectedTtsModel || 'gemini-2.5-flash-preview-tts';
+        const is38TtsModel = currentTtsModel.includes('3.8');
         
         if (currentTtsModel === 'pocket-tts') {
           const baseUrl = pocketTtsUrl.trim().replace(/\/+$/, '') || 'http://localhost:8000';
@@ -1301,112 +1304,203 @@ const App: React.FC = () => {
           const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
           const audioDurationStr = `[Audio Duration: ${audioBuffer.duration.toFixed(2)}s]`;
           addLog(`VOICE: ${networkTimeStr} ${audioDurationStr}`);
-        } else {
-          const is38TtsModel = currentTtsModel.includes('3.8');
-          addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})${is38TtsModel ? ' [speechMetadata.style]' : ''}...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+        } else if (is38TtsModel) {
+          addLog(`VOICE: Streaming insight via Gemini 3.8 TTS [${currentTtsModel}] (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
 
           const textToSpeak = cleanPayload || text.trim();
-
-          let response: any;
-          if (is38TtsModel) {
-            const reqPayload = {
-              model: currentTtsModel,
-              contents: [
-                {
-                  role: 'user',
-                  parts: [
-                    {
-                      text: `## Transcript:\n${textToSpeak}`,
-                      speechMetadata: {
-                        style: styleContent,
-                      },
+          const reqPayload = {
+            model: currentTtsModel,
+            stream: true,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    text: `## Transcript:\n${textToSpeak}`,
+                    speechMetadata: {
+                      style: styleContent,
                     },
-                  ],
-                },
-              ],
-              generationConfig: {
-                responseModalities: ['AUDIO'],
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: {
-                      voiceName: voiceName,
-                    },
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: voiceName,
                   },
                 },
               },
-            };
+            },
+          };
 
-            let res: Response | null = null;
-            let lastError = '';
+          let res: Response | null = null;
+          let lastError = '';
 
-            // Try server-side proxy route first (/api/tts)
-            try {
-              res = await fetch('/api/tts', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(reqPayload),
-              });
-              if (!res.ok) {
-                lastError = `Proxy status ${res.status}: ${await res.text()}`;
-                res = null;
-              }
-            } catch (proxyErr) {
-              lastError = `Proxy failed: ${proxyErr instanceof Error ? proxyErr.message : String(proxyErr)}`;
+          // 1. Try server-side proxy route first (/api/tts with stream: true)
+          try {
+            res = await fetch('/api/tts', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(reqPayload),
+            });
+            if (!res.ok) {
+              lastError = `Proxy status ${res.status}: ${await res.text()}`;
               res = null;
             }
+          } catch (proxyErr) {
+            lastError = `Proxy error: ${proxyErr instanceof Error ? proxyErr.message : String(proxyErr)}`;
+            res = null;
+          }
 
-            // Fallback to direct Generative Language API if proxy is unavailable
-            if (!res) {
-              const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
-              const cleanModelName = currentTtsModel.replace(/^models\//, '');
-              const apiUrl = apiKey
-                ? `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent?key=${encodeURIComponent(apiKey)}`
-                : `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent`;
+          // 2. Direct fallback if proxy is unavailable
+          if (!res) {
+            const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
+            const cleanModelName = currentTtsModel.replace(/^models\//, '');
+            const apiUrl = apiKey
+              ? `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:streamGenerateContent?key=${encodeURIComponent(apiKey)}&alt=sse`
+              : `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:streamGenerateContent?alt=sse`;
 
-              const headers: Record<string, string> = {
-                'Content-Type': 'application/json',
-              };
-              if (apiKey) {
-                headers['x-goog-api-key'] = apiKey;
-              }
-
-              res = await fetch(apiUrl, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({
-                  contents: reqPayload.contents,
-                  generationConfig: reqPayload.generationConfig,
-                }),
-              });
-
-              if (!res.ok) {
-                const errText = await res.text();
-                throw new Error(`Gemini TTS API error (${res.status}): ${errText} (Proxy detail: ${lastError})`);
-              }
+            const headers: Record<string, string> = {
+              'Content-Type': 'application/json',
+            };
+            if (apiKey) {
+              headers['x-goog-api-key'] = apiKey;
             }
 
-            response = await res.json();
-          } else {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            response = await ai.models.generateContent({
-              model: currentTtsModel,
-              contents: [
-                {
-                  parts: [{ text: finalTtsPrompt }],
-                },
-              ],
-              config: {
-                responseModalities: [Modality.AUDIO],
-                speechConfig: {
-                  voiceConfig: {
-                    prebuiltVoiceConfig: { voiceName: voiceName },
-                  },
+            res = await fetch(apiUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                contents: reqPayload.contents,
+                generationConfig: reqPayload.generationConfig,
+              }),
+            });
+
+            if (!res.ok) {
+              const errText = await res.text();
+              throw new Error(`Gemini 3.8 stream error (${res.status}): ${errText} (Proxy detail: ${lastError})`);
+            }
+          }
+
+          if (!res.body) {
+            throw new Error('Response stream body is empty');
+          }
+
+          if (!audioContextRef.current) {
+            audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+          }
+          const ctx = audioContextRef.current;
+          if (ctx.state === 'suspended') {
+            try { await ctx.resume(); } catch (e) {}
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let sseBuffer = '';
+          let firstChunkTimeMs: number | null = null;
+          let totalAudioDuration = 0;
+          let chunkCount = 0;
+          let totalPromptTokens = 0;
+          let totalCandidatesTokens = 0;
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            sseBuffer += decoder.decode(value, { stream: true });
+            const lines = sseBuffer.split('\n');
+            sseBuffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const jsonStr = trimmed.replace(/^data:\s*/, '');
+              if (!jsonStr || jsonStr === '[DONE]') continue;
+
+              try {
+                const chunkJson = JSON.parse(jsonStr);
+                if (chunkJson.usageMetadata) {
+                  totalPromptTokens = chunkJson.usageMetadata.promptTokenCount || totalPromptTokens;
+                  totalCandidatesTokens = chunkJson.usageMetadata.candidatesTokenCount || totalCandidatesTokens;
+                }
+
+                const audioData = chunkJson.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                if (audioData) {
+                  if (firstChunkTimeMs === null) {
+                    firstChunkTimeMs = performance.now() - startTime;
+                    addLog(`VOICE: First audio chunk received in ${(firstChunkTimeMs / 1000).toFixed(2)}s [${currentTtsModel}]`);
+                  }
+
+                  const rawPcmBytes = decodeBase64(audioData);
+                  const chunkAudioBuffer = await decodeAudioData(rawPcmBytes, ctx, 24000, 1);
+
+                  // Schedule seamless continuous playback on Web Audio timeline
+                  const currentTime = ctx.currentTime;
+                  const startAt = Math.max(currentTime + 0.02, nextStreamPlayTimeRef.current);
+                  const source = ctx.createBufferSource();
+                  source.buffer = chunkAudioBuffer;
+                  source.connect(ctx.destination);
+                  source.start(startAt);
+
+                  nextStreamPlayTimeRef.current = startAt + chunkAudioBuffer.duration;
+                  totalAudioDuration += chunkAudioBuffer.duration;
+                  chunkCount++;
+
+                  activeStreamSourcesRef.current.push(source);
+                  source.onended = () => {
+                    activeStreamSourcesRef.current = activeStreamSourcesRef.current.filter(s => s !== source);
+                  };
+                }
+              } catch (parseErr) {
+                // Ignore partial JSON lines
+              }
+            }
+          }
+
+          const streamDurationMs = performance.now() - startTime;
+          const networkTimeStr = `[Stream Time: ${(streamDurationMs / 1000).toFixed(2)}s]`;
+          const audioDurationStr = `[Audio Duration: ${totalAudioDuration.toFixed(2)}s]`;
+          const firstChunkStr = firstChunkTimeMs !== null ? `[Time to First Audio: ${(firstChunkTimeMs / 1000).toFixed(2)}s]` : '';
+          const tokenStr = (totalPromptTokens || totalCandidatesTokens) ? `[Tokens: In ${totalPromptTokens} / Out ${totalCandidatesTokens}] ` : '';
+          addLog(`VOICE: ${tokenStr}${networkTimeStr} ${audioDurationStr} ${firstChunkStr} (${chunkCount} chunks)`);
+
+          const latencyRecorded = firstChunkTimeMs !== null ? firstChunkTimeMs : streamDurationMs;
+          if (summaryId) {
+            const logIndex = allSessionSummariesRef.current.findIndex(s => s.id === summaryId);
+            if (logIndex !== -1) {
+              allSessionSummariesRef.current[logIndex].ttsLatency = latencyRecorded;
+            }
+            setSummaries(prev => prev.map(s => 
+              s.id === summaryId ? { ...s, ttsLatency: latencyRecorded } : s
+            ));
+          }
+
+          return; // Streaming playback started and queued directly on Web Audio
+        } else {
+          addLog(`VOICE: Synthesizing insight via Gemini TTS [${currentTtsModel}] (${voiceName})...${isRetry ? ` (Attempt ${attempt + 1})` : ''}`);
+
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const response = await ai.models.generateContent({
+            model: currentTtsModel,
+            contents: [
+              {
+                parts: [{ text: finalTtsPrompt }],
+              },
+            ],
+            config: {
+              responseModalities: [Modality.AUDIO],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: { voiceName: voiceName },
                 },
               },
-            });
-          }
+            },
+          });
           
           const networkTimeMs = performance.now() - startTime;
           const networkTimeStr = `[Network Time: ${(networkTimeMs/1000).toFixed(2)}s]`;
@@ -2672,6 +2766,11 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
         try { activeSourceNodeRef.current.stop(); } catch (e) {}
         activeSourceNodeRef.current = null;
     }
+    activeStreamSourcesRef.current.forEach(source => {
+        try { source.stop(); } catch (e) {}
+    });
+    activeStreamSourcesRef.current = [];
+    nextStreamPlayTimeRef.current = 0;
     audioQueueRef.current = [];
     isAudioPlayingRef.current = false;
 

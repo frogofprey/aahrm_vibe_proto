@@ -46,8 +46,39 @@ async function startServer() {
       if (!apiKey) {
         return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
       }
-      const { model, contents, generationConfig } = req.body;
+      const { model, contents, generationConfig, stream } = req.body;
       const cleanModel = (model || 'gemini-3.8-flash-lite-tts').replace(/^models\//, '');
+
+      if (stream) {
+        const streamUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:streamGenerateContent?key=${encodeURIComponent(apiKey)}&alt=sse`;
+        const googleRes = await fetch(streamUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ contents, generationConfig }),
+        });
+
+        if (!googleRes.ok) {
+          const errText = await googleRes.text();
+          return res.status(googleRes.status).send(errText);
+        }
+
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        if (googleRes.body) {
+          const reader = googleRes.body.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(value);
+          }
+        }
+        return res.end();
+      }
+
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
       const googleRes = await fetch(apiUrl, {
