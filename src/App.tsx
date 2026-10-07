@@ -592,6 +592,12 @@ const App: React.FC = () => {
       }
 
       // 7. Normal Strategy Logic
+      // For non-interval session types, once RECOVERY has been hit, do not transfer out
+      if (currentSessionState === SessionState.RECOVERY) {
+          transitionTimersRef.current.bonusToRecovery = null;
+          return;
+      }
+
       // Calculations
       const now = Date.now();
       const elapsedMs = now - (sessionStartTime || now);
@@ -703,18 +709,8 @@ const App: React.FC = () => {
                   }
               }
           } else {
-               // Currently RECOVERY
-               if (!isRecoveryCondition) {
-                   // Instant jump to BONUS_ACTIVE
-                   transitionState(SessionState.BONUS_ACTIVE, "HR spiked above recovery ceiling");
-                   transitionTimersRef.current.bonusToRecovery = null;
-               } else {
-                   // Staying Recovery
-                   transitionTimersRef.current.bonusToRecovery = null;
-                   if (currentSessionState !== SessionState.RECOVERY) {
-                       transitionState(SessionState.RECOVERY, "Recovery logic fallback");
-                   }
-               }
+               // Currently RECOVERY: For non-interval session types, do not transfer out once reached
+               transitionTimersRef.current.bonusToRecovery = null;
           }
       }
 
@@ -1991,7 +1987,7 @@ ${((currentObjective as any).transitionStrategy === "interval state" || (current
 </session_stats>`;
 
     const objectiveTrackerSection = `<objective_tracker>
-Zone Compliance: ${runningMetricsRef.current.compliantMinutes}/${performanceMinutes} performance minutes matching target zones.
+Zone Compliance: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} performance minutes matching target zones.
 </objective_tracker>`;
 
     const transitionHistorySection = `<transition_history>
@@ -2376,6 +2372,9 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
 
     // --- METRIC ACCUMULATION GATE ---
     // Always increment metabolic metrics to avoid "penalizing" the user
+    // Each minute summary packet corresponds to 1 minute of workout time.
+    // The Keytel equation already calculates Calories burned PER MINUTE based on avgHr.
+    // Therefore, each 1-minute packet contributes exactly 1 minute worth of calories.
     runningMetricsRef.current.heartPoints += points;
     runningMetricsRef.current.calories += calories;
     
@@ -2386,9 +2385,10 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
                                (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY);
     
     if (isPerformanceState) {
-        const minutesElapsed = values.length / 60;
-        runningMetricsRef.current.performanceMinutes += minutesElapsed; // Increment denominator for active minutes
-        if (isCompliant) runningMetricsRef.current.compliantMinutes += minutesElapsed;
+        // Each minute summary packet corresponds to a 1-minute interval window
+        const activeMinutesInPacket = 1.0;
+        runningMetricsRef.current.performanceMinutes += activeMinutesInPacket;
+        if (isCompliant) runningMetricsRef.current.compliantMinutes += activeMinutesInPacket;
     }
 
     // --- Target Zone Info for Logging ---
@@ -2900,12 +2900,16 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
   // Compute the latest cleaned insight for display
   const latestInsightCleaned = useMemo(() => {
     if (finalReportText) return cleanInsightText(finalReportText);
+
+    // If periodic responses are being awaited, show "Awaiting Feedback"
+    if (summaries.some(s => s.isAnalyzing)) return 'Awaiting Feedback';
+
     if (summaries.length > 0 && summaries[0].insight) return cleanInsightText(summaries[0].insight);
     
-    // If we are in an active state but have no summaries yet, don't show the intro text
-    // as it makes it look like the system is stuck on the intro.
+    // If we are in an active state, don't show the intro text (mission briefing)
+    // as it makes it look like the system is stuck on or reverting to the intro.
     const isActive = [SessionState.MAIN_ACTIVE, SessionState.RECOVERY, SessionState.BONUS_ACTIVE].includes(currentSessionState);
-    if (isActive && summaries.length === 0) return undefined;
+    if (isActive) return undefined;
 
     if (introText) return cleanInsightText(introText);
     return undefined;

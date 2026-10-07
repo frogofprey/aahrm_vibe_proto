@@ -98,9 +98,18 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
       {/* Full Screen Insight Overlay */}
       {isFullScreen && latestInsight && (
         <div className="mt-6 z-10 max-w-2xl text-center px-4 animate-pulse duration-[3000ms]">
-          <div className="text-[10px] text-cyan-500/70 uppercase tracking-widest mb-2 font-bold">Analyst Uplink</div>
-          <p className={`text-lg md:text-xl font-medium italic leading-relaxed ${zone ? zone.textClass : 'text-slate-300'} transition-colors duration-500`}>
-            "{latestInsight}"
+          <div className="text-[10px] text-cyan-500/70 uppercase tracking-widest mb-2 font-bold">
+            {latestInsight === 'Awaiting Feedback' ? 'Analyst Uplink // Syncing' : 'Analyst Uplink'}
+          </div>
+          <p className={`text-lg md:text-xl font-medium ${latestInsight === 'Awaiting Feedback' ? 'not-italic font-mono text-cyan-400 flex items-center justify-center gap-2' : `italic leading-relaxed ${zone ? zone.textClass : 'text-slate-300'}`} transition-colors duration-500`}>
+            {latestInsight === 'Awaiting Feedback' ? (
+              <>
+                <span className="inline-block w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping mr-1" />
+                Awaiting Feedback
+              </>
+            ) : (
+              `"${latestInsight}"`
+            )}
           </p>
         </div>
       )}
