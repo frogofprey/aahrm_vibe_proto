@@ -1776,6 +1776,24 @@ ${sessionContext}${activityContext}
           };
 
           narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage, parsedValue };
+
+          // If a [BONUS] tag is present in the narrative plan, add a bonus milestone at session duration goal
+          if (parsedValue.bonus && parsedValue.bonus.length > 0) {
+              const bonusTimeSeconds = sessionDurationGoal * 60;
+              const bonusTimeMM = Math.floor(bonusTimeSeconds / 60);
+              const bonusTimeSS = Math.floor(bonusTimeSeconds % 60);
+              const bonusTimeLabel = `${bonusTimeMM}:${bonusTimeSS.toString().padStart(2, '0')}`;
+              parsedMilestones.push({
+                  timeInSeconds: bonusTimeSeconds,
+                  timeLabel: bonusTimeLabel,
+                  label: "Bonus Objective",
+                  narrative: parsedValue.bonus
+              });
+              // Keep milestones chronologically sorted
+              parsedMilestones.sort((a, b) => a.timeInSeconds - b.timeInSeconds);
+          }
+
+          narrativeMilestonesRef.current = parsedMilestones;
           
           if (parsedMilestones.length > 0) {
               addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES (${parsedMilestones.length}) ---`);
@@ -2148,6 +2166,9 @@ ${historyContext || "No recent history available."}`;
     if (summary.sessionState === SessionState.WARMUP) {
         packetExtras += `\nWarmup State: The user is currently in a warmup state and is working to get their heart rate into the correct zone for the session to start in earnest. Encourage and acknowledge this.`;
     }
+    if (summary.sessionState === SessionState.BONUS_ACTIVE) {
+        packetExtras += `\nBonus Active Mode: The user has completed all objective requirements and is being encouraged to ramp heart rate down to a recovery mode.`;
+    }
     if (isFinalMilestoneActive) {
         packetExtras += `\nFinal Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery.`;
     }
@@ -2449,6 +2470,13 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
             return `Zone ${idx} (${Math.round(z.min)}-${maxLabel})`;
         });
         targetZoneInfo = zoneLabels.join(", ");
+    }
+
+    // Restrict coaching direction in BONUS_ACTIVE mode: avoid coaching to increase level of effort (cap at Maintain)
+    if (effectiveFrameState === SessionState.BONUS_ACTIVE) {
+        if (coachingDirection.includes("Increase")) {
+            coachingDirection = "Maintain";
+        }
     }
 
     // --- Narrative Milestone check ---
