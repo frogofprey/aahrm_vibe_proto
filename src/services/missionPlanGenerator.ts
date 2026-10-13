@@ -46,13 +46,13 @@ export function generateMissionPlanTemplate(
       timeline.push({
         seconds: cycleStart,
         label: `[Interval ${i + 1} Name]`,
-        description: `[Thematic description of the high-intensity interval ${i + 1}. Encourage effort and target zone engagement.]`
+        description: `Pass: [Thematic victory/progress as user engages target effort in interval ${i + 1}] || Fail: [Humorous complication or struggling effort as user falls behind in interval ${i + 1}]`
       });
 
       timeline.push({
         seconds: recoveryStart,
         label: `[Recovery ${i + 1} Name]`,
-        description: `[Thematic description of recovery period ${i + 1}. Encourage heat shedding and heart rate reduction.]`
+        description: `Pass: [Thematic recovery success, shedding heat smoothly in recovery ${i + 1}] || Fail: [Humorous struggle to cool down or panting complications in recovery ${i + 1}]`
       });
     }
 
@@ -60,7 +60,7 @@ export function generateMissionPlanTemplate(
     timeline.push({
       seconds: totalSessionSeconds,
       label: "[Mission Success Name]",
-      description: "[Resolution of the thematic encounter and cooldown transition]"
+      description: "Pass: [Resolution of the encounter in complete victory and cooldown transition] || Fail: [Narrow or comical survival finish as session concludes and cooldown begins]"
     });
 
   } else {
@@ -76,22 +76,41 @@ export function generateMissionPlanTemplate(
 
     // Define milestones in order of hierarchy (highest first)
     // 1. Start and End
-    const startDescription = strategy === "normal state" 
-      ? "[Insert thematic description of the session beginning. This denotes the end of the warmup session.]"
-      : "[Insert thematic description of the session beginning. This denotes the start of the session.]";
+    const startPassDescription = strategy === "normal state" 
+      ? "[Thematic description of the session beginning as user enters target zone smoothly]"
+      : "[Thematic description of the session beginning]";
+    const startFailDescription = strategy === "normal state"
+      ? "[Humorous start as user scrambles into gear or hesitates to find their pace]"
+      : "[Humorous start as user gets going]";
 
-    milestones.push({ seconds: 0, label: "[Event Name]", description: startDescription });
-    milestones.push({ seconds: durationSeconds, label: "[Event Name]", description: "[Insert description of the resolution and cooldown transition]" });
+    milestones.push({ 
+      seconds: 0, 
+      label: "[Event Name]", 
+      description: `Pass: ${startPassDescription} || Fail: ${startFailDescription}` 
+    });
+    milestones.push({ 
+      seconds: durationSeconds, 
+      label: "[Event Name]", 
+      description: "Pass: [Thematic resolution of goal and glorious cooldown transition] || Fail: [Comical or exhausting scrape-by resolution to finish the session]" 
+    });
 
     // 2. Warning (2 mins prior to end)
     const warningSeconds = durationSeconds - 120;
     if (warningSeconds > 0) {
-      milestones.push({ seconds: warningSeconds, label: "[Event Name]", description: "[Insert description of the climax or final push nearing completion]" });
+      milestones.push({ 
+        seconds: warningSeconds, 
+        label: "[Event Name]", 
+        description: "Pass: [Climax or final push nearing glorious completion] || Fail: [Desperate humorous push trying to stay in the fight nearing the end]" 
+      });
     }
 
     // 3. Every 5 minutes
     for (let s = 300; s < durationSeconds; s += 300) {
-      milestones.push({ seconds: s, label: "[Event Name]", description: "[Insert description of a mid-point complication or environmental change]" });
+      milestones.push({ 
+        seconds: s, 
+        label: "[Event Name]", 
+        description: "Pass: [Mid-point event progress or overcoming environmental challenge] || Fail: [Humorous setback, blunder, or comical distraction due to missed pace]" 
+      });
     }
 
     // Sort to apply hierarchy rules

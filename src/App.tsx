@@ -915,7 +915,11 @@ const App: React.FC = () => {
     if (narrativeMilestonesRef.current && narrativeMilestonesRef.current.length > 0) {
         contentDebug += `[NARRATIVE MISSION PLAN READY | ${narrativeMilestonesRef.current.length} Milestones | Last Check Index: ${lastMilestoneCheckSecondRef.current}s]\n`;
         narrativeMilestonesRef.current.forEach(m => {
-            contentDebug += `   - ${m.timeLabel} (${m.timeInSeconds}s) [${m.label}] || ${m.narrative}\n`;
+            if (m.compliantNarrative !== m.nonCompliantNarrative) {
+                contentDebug += `   - ${m.timeLabel} (${m.timeInSeconds}s) [${m.label}] || PASS: ${m.compliantNarrative} || FAIL: ${m.nonCompliantNarrative}\n`;
+            } else {
+                contentDebug += `   - ${m.timeLabel} (${m.timeInSeconds}s) [${m.label}] || ${m.compliantNarrative}\n`;
+            }
         });
         contentDebug += `--------------------------------------------------\n\n`;
     } else if (narrativeMissionPlanRef.current) {
@@ -1666,7 +1670,10 @@ You are an expert author/Narrative creator. Based on the following Persona, crea
 
 [REQUIREMENTS]
 -Recontextualize the workout goals into the persona's thematic world. Use the persona's thematic world as inspiration for naming and narrative flavor, but write the plan in a neutral, third-person planning voice. 
--Preserve the Milestones provided in the OUTPUT FORMAT section. Don't add new milestones, simply make the provided milestones more thematic.   
+-Preserve the Milestones provided in the OUTPUT FORMAT section. Don't add new milestones, simply make the provided milestones more thematic.
+-For each timeline milestone, provide two distinct narrative outcomes:
+  1) Pass: a thematic narrative of success, high performance, or overcoming the challenge when the user is compliant.
+  2) Fail: a humorous or ironic complication, blunder, or struggling outcome when the user is non-compliant.
 -Define a "Mission Complete" narrative conclusion (Goals Met). 
 -Generate a Maguffin for the persona to use narratively. 
 -Define a short reference for the player in their thematic role labeled protagonist. This reference should be a single word. 
@@ -1675,7 +1682,7 @@ You are an expert author/Narrative creator. Based on the following Persona, crea
 
 [CONSTRAINTS]
 Hard Constraint: Output should match the OUTPUT FORMAT block - do not devaiate from this format. 
-STRICT REPLACEMENT: You must keep the exact structural format of the timeline. ONLY replace the text inside the placeholder brackets (e.g., '[Insert description]'). 
+STRICT REPLACEMENT: You must keep the exact structural format of the timeline. Follow the format: 'M:SS [Label] || Pass: [Pass narrative] || Fail: [Fail narrative]' exactly.
 PRESERVE TIMESTAMPS: Do NOT alter, add, or remove any 'M:SS' timestamps.
 THIRD-PERSON TONE: Write in a neutral, cinematic, third-person voice. Describe the events like a dungeon master. Do NOT roleplay as the Persona (e.g., do not use the persona's slang or first-person pronouns).
 ARTICLES: Avoid using "the" at the start of roles or rewards. Let the agent add them at runtime not now. 
@@ -1733,13 +1740,12 @@ ${sessionContext}${activityContext}
               const cleanedLine = rawLine.replace(/^[-*•\s]+/, '').replace(/^\d+\.\s+/, '').trim();
               // Strip markdown bold wrappers around timestamp like **0:00**
               const normalizedLine = cleanedLine.replace(/^\*\*([0-9:]+)\*\*/, '$1');
-              // Regex for "M:SS [Label] || Narrative" or "M:SS Label || Narrative"
-              // Supporting both bracketed and unbracketed labels, and multiple separators.
+              // Regex for "M:SS [Label] || Narrative..." or "M:SS Label || Narrative..."
               const lineMatch = normalizedLine.match(/^(\d+[:\d+]*)\s*(?:\[(.*?)\]|([^:|]+?))\s*(?::|\|+)\s*(.*)$/);
               if (lineMatch) {
                   const timeLabel = lineMatch[1].trim();
                   const label = (lineMatch[2] || lineMatch[3]).trim().replace(/^\*+|\*+$/g, '');
-                  const narrative = lineMatch[4].trim().replace(/^\*+|\*+$/g, '');
+                  const rawNarrative = lineMatch[4].trim().replace(/^\*+|\*+$/g, '');
                   
                   // Convert timeLabel to seconds
                   const parts = timeLabel.split(':').map(Number);
@@ -1751,8 +1757,27 @@ ${sessionContext}${activityContext}
                   } else if (parts.length === 3) { // HH:MM:SS
                       timeInSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
                   }
+
+                  // Parse dual Pass/Fail branches if present (e.g. "Pass: [...] || Fail: [...]")
+                  let compliantNarrative = rawNarrative;
+                  let nonCompliantNarrative = rawNarrative;
+
+                  const dualMatch = rawNarrative.match(/(?:^|\|+)\s*pass\s*:\s*(.*?)(?=\s*\|{1,2}\s*fail\s*:|$)/i);
+                  const failMatch = rawNarrative.match(/fail\s*:\s*(.*)$/i);
+
+                  if (dualMatch && failMatch) {
+                      compliantNarrative = dualMatch[1].trim().replace(/^\*+|\*+$/g, '');
+                      nonCompliantNarrative = failMatch[1].trim().replace(/^\*+|\*+$/g, '');
+                  }
                   
-                  parsedMilestones.push({ timeInSeconds, timeLabel, label, narrative });
+                  parsedMilestones.push({ 
+                      timeInSeconds, 
+                      timeLabel, 
+                      label, 
+                      compliantNarrative, 
+                      nonCompliantNarrative,
+                      narrative: compliantNarrative 
+                  });
               }
           });
           
@@ -1800,6 +1825,8 @@ ${sessionContext}${activityContext}
                   timeInSeconds: bonusTimeSeconds,
                   timeLabel: bonusTimeLabel,
                   label: "Bonus Objective",
+                  compliantNarrative: parsedValue.bonus,
+                  nonCompliantNarrative: parsedValue.bonus,
                   narrative: parsedValue.bonus
               });
               // Keep milestones chronologically sorted
@@ -1811,7 +1838,11 @@ ${sessionContext}${activityContext}
           if (parsedMilestones.length > 0) {
               addLog(`SYSTEM: --- PARSED NARRATIVE MILESTONES (${parsedMilestones.length}) ---`);
               parsedMilestones.forEach(m => {
-                  addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.narrative}`);
+                  if (m.compliantNarrative !== m.nonCompliantNarrative) {
+                      addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || PASS: ${m.compliantNarrative} || FAIL: ${m.nonCompliantNarrative}`);
+                  } else {
+                      addLog(`  [${m.timeLabel}] (${m.timeInSeconds}s) ${m.label} || ${m.compliantNarrative}`);
+                  }
               });
               if (parsedValue.theme) addLog(`  [THEME] ${parsedValue.theme}`);
               if (parsedValue.maguffin) addLog(`  [MAGUFFIN] ${parsedValue.maguffin}`);
@@ -2092,9 +2123,24 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
             if (isFinalMilestone) {
                 isFinalMilestoneActive = true;
             }
+
+            // Determine compliance branch based on cumulative session compliance up to this point
+            // Golden bullet rule: early milestones (e.g. <= 60s active time or performance minutes < 2) always pass
+            const totalPerfMinutes = runningMetricsRef.current.performanceMinutes;
+            const totalCompliantMins = runningMetricsRef.current.compliantMinutes;
+            const compliancePct = totalPerfMinutes > 0 ? (totalCompliantMins / totalPerfMinutes) * 100 : 100;
+            const isEarlyMilestone = (milestoneData.timeInSeconds <= 60) || (totalPerfMinutes < 2);
+            const isCompliantAtMilestone = isEarlyMilestone || (compliancePct >= 80);
+
+            const selectedNarrative = isCompliantAtMilestone 
+                ? (milestoneData.compliantNarrative || milestoneData.narrative || "")
+                : (milestoneData.nonCompliantNarrative || milestoneData.narrative || "");
+
             milestoneSection = `milestone:
-${milestoneData.label}: ${milestoneData.narrative}`;
+${milestoneData.label}: ${selectedNarrative}`;
             milestoneInstruction = MILESTONE_INSTRUCTION;
+
+            addLog(`MILESTONE_EVAL: "${milestoneData.label}" -> Branch: [${isCompliantAtMilestone ? 'PASS' : 'FAIL'}] (Cumulative: ${compliancePct.toFixed(1)}% | Early: ${isEarlyMilestone})`);
         }
     }
 
@@ -3323,6 +3369,9 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
               isFullScreen={isFullScreen}
               hrTrend={hrTrend}
               intervalCount={intervalCount}
+              compliantMinutes={runningMetricsRef.current.compliantMinutes}
+              performanceMinutes={runningMetricsRef.current.performanceMinutes}
+              complianceThresholdPct={80}
             />
             {!isFullScreen && (
               <div className="p-4 aether-border bg-slate-900/20 opacity-60 text-[10px] font-mono">

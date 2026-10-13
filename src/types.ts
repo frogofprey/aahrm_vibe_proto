@@ -89,7 +89,9 @@ export interface NarrativeMilestone {
   timeInSeconds: number;
   timeLabel: string;
   label: string;
-  narrative: string;
+  compliantNarrative: string;
+  nonCompliantNarrative: string;
+  narrative?: string;
 }
 
 export interface ParsedNarrativePlan {

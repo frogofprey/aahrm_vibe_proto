@@ -10,9 +10,24 @@ interface HeartRateDisplayProps {
   isFullScreen?: boolean;
   hrTrend?: string;
   intervalCount?: number;
+  compliantMinutes?: number;
+  performanceMinutes?: number;
+  complianceThresholdPct?: number;
 }
 
-const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTime, activeTime, latestInsight, isFullScreen, hrTrend, intervalCount }) => {
+const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ 
+  hr, 
+  zone, 
+  elapsedTime, 
+  activeTime, 
+  latestInsight, 
+  isFullScreen, 
+  hrTrend, 
+  intervalCount,
+  compliantMinutes = 0,
+  performanceMinutes = 0,
+  complianceThresholdPct = 80
+}) => {
   const displayValue = hr !== null ? hr : '--';
   
   // Neutral fallbacks for when no zone is matched or no data is present
@@ -90,6 +105,37 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({ hr, zone, elapsedTi
             <span className="text-[9px] text-orange-500/70 uppercase tracking-[0.2em] mb-1">Intervals</span>
             <div className="text-2xl font-mono font-bold tracking-widest text-orange-400">
                 {intervalCount}
+            </div>
+          </div>
+        )}
+
+        {/* Live Compliance HUD (Full Screen & Debugging) */}
+        {isFullScreen && (
+          <div className="mt-4 flex flex-col items-center bg-black/40 border border-slate-800/80 px-4 py-2 rounded-sm backdrop-blur-md">
+            <span className="text-[9px] text-slate-500 uppercase tracking-[0.2em] mb-1">Live Compliance (HUD)</span>
+            <div className="flex items-center gap-2 font-mono">
+              {(() => {
+                const ratioPct = performanceMinutes > 0 ? (compliantMinutes / performanceMinutes) * 100 : 100;
+                const isPassing = ratioPct >= complianceThresholdPct;
+                return (
+                  <>
+                    <span className={`text-xs px-2 py-0.5 rounded-xs font-bold uppercase tracking-wider ${
+                      isPassing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                    }`}>
+                      {performanceMinutes === 0 ? 'READY' : (isPassing ? 'PASS' : 'FAIL')}
+                    </span>
+                    <span className="text-sm font-bold text-slate-300">
+                      {compliantMinutes.toFixed(1)} / {performanceMinutes.toFixed(1)} min
+                    </span>
+                    <span className={`text-xs font-semibold ${isPassing ? 'text-emerald-400' : 'text-red-400'}`}>
+                      ({performanceMinutes > 0 ? ratioPct.toFixed(1) : '100.0'}%)
+                    </span>
+                    <span className="text-[10px] text-slate-600">
+                      [Goal: &ge;{complianceThresholdPct}%]
+                    </span>
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
