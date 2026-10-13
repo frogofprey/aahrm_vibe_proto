@@ -1777,9 +1777,22 @@ ${sessionContext}${activityContext}
 
           narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage, parsedValue };
 
-          // If a [BONUS] tag is present in the narrative plan, add a bonus milestone at session duration goal
+          // If a [BONUS] tag is present in the narrative plan, add a bonus milestone starting 5 minutes (300s) after the session target duration completes
           if (parsedValue.bonus && parsedValue.bonus.length > 0) {
-              const bonusTimeSeconds = sessionDurationGoal * 60;
+              const strategy = (currentObjective as any).transitionStrategy || "normal state";
+              const isInterval = strategy === "interval state" || strategy === "fixed interval state";
+              // Base target duration in seconds (for interval sessions, total duration is cycle * intervalCountGoal)
+              const baseTargetSeconds = isInterval 
+                  ? (intervalTime * 60 * 2) * intervalCountGoal 
+                  : (sessionDurationGoal * 60);
+
+              let bonusTimeSeconds = baseTargetSeconds + 300; // 5 minutes after session target duration
+
+              // Ensure the bonus milestone doesn't conflict/overlap with any existing milestone (within 60 seconds)
+              while (parsedMilestones.some(m => Math.abs(m.timeInSeconds - bonusTimeSeconds) < 60)) {
+                  bonusTimeSeconds += 60; // Nudge forward by 1 minute if conflict
+              }
+
               const bonusTimeMM = Math.floor(bonusTimeSeconds / 60);
               const bonusTimeSS = Math.floor(bonusTimeSeconds % 60);
               const bonusTimeLabel = `${bonusTimeMM}:${bonusTimeSS.toString().padStart(2, '0')}`;
