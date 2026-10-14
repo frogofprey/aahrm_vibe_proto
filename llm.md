@@ -98,9 +98,7 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
     *   **Bonus Active Mode Instruction** (Conditional): Injected in `BONUS_ACTIVE` encouraging ramp-down to recovery.
     *   **Activity Context** (Conditional).
     *   **Transition History**: Log of all state changes within the session.
-    *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
-    *   **Short-Term History**: Contains up to the **last 2 chronological responses** (can include the session intro if it's within the last two responses; otherwise only the latest insights).
-    *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction (capped at `Maintain` in `BONUS_ACTIVE`), Importance, Safety Flag.
+    *   **Short-Term History**: Contains up to the **last 5 chronological responses** (session intro and/or previous insights) with delivery status tags: `(spoken)`, `(spoken/milestone)`, or `(skipped)`.
 *   **Output**: Plain text coaching narration in the specified persona. (600 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the app-calculated `Importance` score >= User's configured Voice Threshold (Squelch).
 

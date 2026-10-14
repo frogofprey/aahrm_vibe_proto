@@ -45,7 +45,11 @@ Conditional block populated only when a narrative event is active for the curren
 - **Final Milestone**: If this represents the final milestone of the main session, an explicit instruction is appended: "Final Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery."
 
 ## 5. Short-Term Context Section (`short_term_context:`)
-Maintains continuity and prevents word repetition by supplying exactly the last 2 chronological responses to the user (e.g., the session intro and/or previous minute insights, chronologically ordered). If the session intro is no longer one of the last two responses, it is excluded to avoid over-anchoring.
+Maintains continuity and prevents word repetition by supplying the **last 5 chronological responses** to the user (e.g., the session intro and/or previous minute insights, chronologically ordered).
+Each entry includes an explicit delivery status tag at the end to indicate whether the message was heard by the user:
+- `(spoken)`: The message was synthesized and delivered over audio.
+- `(spoken/milestone)`: The message contained an active narrative milestone and was delivered over audio.
+- `(skipped)`: The audio was suppressed because the packet's importance score was below the user's voice squelch threshold, or voice was disabled.
 
 ## 6. Current Minute Packet Section (`current_minute_packet:`)
 Streamlined real-time telemetry and coaching direction.

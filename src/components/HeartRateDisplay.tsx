@@ -92,7 +92,7 @@ const HeartRateDisplay: React.FC<HeartRateDisplayProps> = ({
         <div className={`text-xl font-mono font-bold tracking-widest ${elapsedTime !== "00:00:00" ? 'text-white' : 'text-slate-600'}`}>
             {elapsedTime}
         </div>
-        {activeTime !== "00:00" && (
+        {activeTime !== "00:00" && activeTime !== "00:00:00" && (
           <div className="mt-2 flex flex-col items-center">
             <span className="text-[9px] text-cyan-500/70 uppercase tracking-[0.2em] mb-1">Active Time</span>
             <div className="text-2xl font-mono font-bold tracking-widest text-cyan-400">

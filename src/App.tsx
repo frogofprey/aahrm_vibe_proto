@@ -52,10 +52,14 @@ function formatDuration(ms: number): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function formatMMSS(ms: number): string {
+function formatActiveDuration(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
@@ -153,7 +157,7 @@ Data Input: You will receive a current_minute_packet containing metrics about th
 Coaching Direction: the input telemetry in current_minute_packet will show you the users coaching direction and urgency. Provide clear guidance to the user using the provided persona to convey the coaching direction. This guidance should be clear in the first few words of the output. The provided importance number can also be used. If the number is higher than 6, then the urgency should be increased. 
 {{MILESTONE_CONSTRAINT}}
 ABSOLUTE LIMIT: No more than two sentences or 45 words maximum. Less is more in this context so try to keep responses short and punchy.
-NARRATIVE FLOW: use the narrative_mission_plan and short_term_context sections to create a narrative flow while still focusing on the coaching direction. Avoid repeating phrases or elements not directly connected with the coaching guidance. Include the protagonist tag in your response but only incorporate the other elements sparingly. 
+NARRATIVE FLOW: use the narrative_mission_plan and short_term_context sections to create a narrative flow while still focusing on the coaching direction. Avoid repeating phrases or elements not directly connected with the coaching guidance. In short_term_context, tags indicate what the user heard: (spoken) means delivered by voice, (spoken/milestone) means a spoken milestone event, and (skipped) means the audio was suppressed because priority was below the voice threshold. Include the protagonist tag in your response but only incorporate the other elements sparingly. 
 Return only the persona narration text that would be useable by a follow on TTS service.
 `;
 
@@ -817,7 +821,7 @@ const App: React.FC = () => {
       interval = setInterval(() => {
         setElapsedTime(formatDuration(Date.now() - sessionStartTime));
         if (hasStartedActiveRef.current) {
-            setActiveTime(formatMMSS(activeDurationRef.current));
+            setActiveTime(formatActiveDuration(activeDurationRef.current));
         } else {
             setActiveTime("00:00");
         }
@@ -947,9 +951,14 @@ const App: React.FC = () => {
       allSessionSummariesRef.current.forEach((s, index) => {
         contentDebug += `[PACKET #${index + 1} | ${s.timestamp}]\n`;
         contentDebug += `   > STATE      : ${s.sessionState || "N/A"}\n`;
-        const activeMM = Math.floor((s.activeTime || 0) / 60);
-        const activeSS = Math.floor((s.activeTime || 0) % 60);
-        contentDebug += `   > TIME       : Session ${Math.floor((index + 1))} min | Active ${activeMM}:${activeSS.toString().padStart(2, '0')}\n`;
+        const totalActiveSec = s.activeTime || 0;
+        const activeHH = Math.floor(totalActiveSec / 3600);
+        const activeMM = Math.floor((totalActiveSec % 3600) / 60);
+        const activeSS = Math.floor(totalActiveSec % 60);
+        const activeFormatted = activeHH > 0
+            ? `${activeHH.toString().padStart(2, '0')}:${activeMM.toString().padStart(2, '0')}:${activeSS.toString().padStart(2, '0')}`
+            : `${activeMM.toString().padStart(2, '0')}:${activeSS.toString().padStart(2, '0')}`;
+        contentDebug += `   > TIME       : Session ${Math.floor((index + 1))} min | Active ${activeFormatted}\n`;
         
         const displaySmoothed = (s.smoothedHR !== undefined && s.smoothedHR !== null) ? s.smoothedHR.toString() : "N/A";
         
@@ -2010,7 +2019,7 @@ ${objectivesContext}
         ? `\nActivity Context: The user is performing: ${selectedActivity === 'other' ? customActivity : selectedActivity}`
         : "";
 
-    const activeDurationStr = formatMMSS(activeDurationRef.current);
+    const activeDurationStr = formatActiveDuration(activeDurationRef.current);
     const activeMinutes = (activeDurationRef.current / 60000).toFixed(1);
 
     const taskSection = `<task>
@@ -2191,25 +2200,48 @@ ${narrativeMissionPlanRef.current ? `\n\nNARRATIVE MISSION PLAN (Story Arc):\n${
     const currentIndex = allSummaries.findIndex(s => s.id === summary.id);
     
     // Build a complete chronological ordered list of all responses output to the user so far
-    const responseHistory: { type: 'intro' | 'insight'; text: string }[] = [];
+    interface ResponseHistoryItem {
+        type: 'intro' | 'insight';
+        text: string;
+        deliveryStatus: '(spoken)' | '(spoken/milestone)' | '(skipped)';
+    }
+
+    const responseHistory: ResponseHistoryItem[] = [];
     if (sessionIntroRef.current && sessionIntroRef.current.text) {
-        responseHistory.push({ type: 'intro', text: sessionIntroRef.current.text });
+        // Intro is always voiced if voice is enabled, or skipped if voice is disabled
+        const introStatus = isVoiceEnabled ? '(spoken)' : '(skipped)';
+        responseHistory.push({ type: 'intro', text: sessionIntroRef.current.text, deliveryStatus: introStatus });
     }
     allSummaries.slice(0, currentIndex).forEach(s => {
         if (s.insight && s.insight.trim()) {
-            responseHistory.push({ type: 'insight', text: s.insight.trim() });
+            const importance = s.importance ?? 0;
+            const isSpoken = isVoiceEnabled && (importance >= chattiness);
+            const isMilestone = Boolean(s.milestoneLabel && s.milestoneLabel !== 'none');
+            
+            let deliveryStatus: '(spoken)' | '(spoken/milestone)' | '(skipped)';
+            if (isSpoken) {
+                deliveryStatus = isMilestone ? '(spoken/milestone)' : '(spoken)';
+            } else {
+                deliveryStatus = '(skipped)';
+            }
+
+            responseHistory.push({ 
+                type: 'insight', 
+                text: s.insight.trim(), 
+                deliveryStatus 
+            });
         }
     });
 
-    // Only include the last two responses
-    const last2Responses = responseHistory.slice(-2);
+    // Include the last five responses
+    const last5Responses = responseHistory.slice(-5);
     
     let historyContext = "";
-    last2Responses.forEach(resp => {
+    last5Responses.forEach(resp => {
         if (resp.type === 'intro') {
-            historyContext += `-Intro: ${resp.text}\n`;
+            historyContext += `-Intro: ${resp.text} ${resp.deliveryStatus}\n`;
         } else {
-            historyContext += `-${resp.text}\n`;
+            historyContext += `-${resp.text} ${resp.deliveryStatus}\n`;
         }
     });
     // --- HISTORY BUILDER END ---
