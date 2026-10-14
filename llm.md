@@ -49,7 +49,10 @@ These calls occur immediately after the user clicks **"START SESSION"**.
 ### B. Narrative Mission Plan
 *   **Trigger**: Automatically called after the Mission Profile is successfully generated.
 *   **Purpose**: Programmatically generates a base template (via `generateMissionPlanTemplate`) and then uses AI to fill it with narrative flavor (thematic interpretation).
-*   **Logic**: Calculates precise timestamps for intervals or milestones based on the strategy. The LLM's role is strictly to recontextualize these technical milestones into the persona's thematic world.
+*   **Logic**: Calculates precise timestamps for intervals or milestones based on the strategy. Generates **dual Pass and Fail narrative branches** for every milestone:
+    *   `Pass: [Thematic victory narrative]` (delivered when cumulative compliance is met).
+    *   `Fail: [Humorous/ironic complication narrative]` (delivered when cumulative compliance is missed).
+    *   `[BONUS]` tag: Parsed and scheduled as a bonus milestone at 5 minutes past target duration with collision avoidance.
 *   **Dependencies**: Requires session parameters (duration, interval count/time).
 *   **Context/Input**: 
     *   Selected Persona (System Instruction & Mission Profile).
@@ -57,7 +60,7 @@ These calls occur immediately after the user clicks **"START SESSION"**.
     *   Session Context (Duration or Interval structure).
     *   Activity Context (Conditional).
 *   **Implementation**: LLM call (selected user model) with a **Strict Structured Template**. 
-    *   **Hard Constraints**: Match the provided structure exactly, preserve all `M:SS` timestamps, and only replace bracketed placeholders with "flavor" text.
+    *   **Hard Constraints**: Match the provided structure exactly (`M:SS [Label] || Pass: [...] || Fail: [...]`), preserve all `M:SS` timestamps, and only replace bracketed placeholders with "flavor" text.
     *   **Tone**: Use a neutral, cinematic, third-person "Dungeon Master" voice (not first-person persona roleplay).
 *   **Output**: A structured timeline of narrative events (`[THEME]`, `[TIMELINE]`, `[Mission Complete]`, `[Maguffin]`, `[ANTAGONIST]`, `[PROTAGONIST]`, `[BONUS]`).
 
@@ -89,13 +92,15 @@ These calls occur cyclically every 60 seconds once sufficient data has been coll
 *   **Context/Input**:
     *   **Persona**: Tailored system instruction.
     *   **Narrative Mission Plan**: Extracted elements (Theme, Maguffin, Antagonist, Protagonist) to preserve narrative context.
+    *   **Milestone**: Evaluated deterministically based on cumulative compliance ($\ge 80\%$, with golden bullet early pass). Injects **only the single resolved outcome** into the prompt.
     *   **Telemetry Abstraction Instruction** (Conditional).
     *   **Warmup State Specific Instruction** (Conditional): Active only during the initial `WARMUP` state, urging character-safe encouragement to raise heart rate.
+    *   **Bonus Active Mode Instruction** (Conditional): Injected in `BONUS_ACTIVE` encouraging ramp-down to recovery.
     *   **Activity Context** (Conditional).
     *   **Transition History**: Log of all state changes within the session.
     *   **Objective Tracker**: Current progress vs. Goal (Time/Intervals), Compliance Score.
     *   **Short-Term History**: Contains up to the **last 2 chronological responses** (can include the session intro if it's within the last two responses; otherwise only the latest insights).
-    *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction, Importance, Safety Flag.
+    *   **Current Packet**: BPM (cur/avg/max/min), HR Trend, Coaching Direction (capped at `Maintain` in `BONUS_ACTIVE`), Importance, Safety Flag.
 *   **Output**: Plain text coaching narration in the specified persona. (600 `maxOutputTokens` in `generationConfig`).
 *   **Side Effect**: Triggers **TTS Synthesis** *only if* the app-calculated `Importance` score >= User's configured Voice Threshold (Squelch).
 
@@ -160,7 +165,7 @@ sequenceDiagram
     participant User
     participant App
     participant AI as Selected LLM (Flash/Gemma)
-    participant TTS as Gemini 2.5 TTS
+    participant TTS as Selected TTS Engine (Gemini TTS / Local)
 
     Note over User, App: 1. INITIALIZATION
     User->>App: Click "Start Session"

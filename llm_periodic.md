@@ -39,7 +39,10 @@ Provides a randomized selection of narrative context elements extracted from the
     - **Importance 9-10 (Critical Danger)**: [THEME] 0%, [ANTAGONIST] 0%, [MAGUFFIN] 0% (All omitted except Protagonist to focus purely on instruction/coaching)
 
 ## 4. Milestone Section (`milestone:`)
-Conditional block populated only when a narrative event is active for the current packet. Placed directly after the `narrative_mission_plan` section. Includes the event title and narrative context (excludes the timing/timestamp). If this represents the final milestone of the main session, an explicit instruction is appended: "Final Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery."
+Conditional block populated only when a narrative event is active for the current packet. Placed directly after the `narrative_mission_plan` section. 
+- **Deterministic Branch Selection**: Evaluated by the application based on cumulative session compliance up to that point ($\ge 80\%$, with early milestones $\le 60\text{s}$ or active performance $< 2\text{m}$ granted a golden bullet `PASS`). The LLM prompt is supplied with **only the single resolved outcome** (`Pass` or `Fail`), completely eliminating the decision burden on the coach LLM.
+- **Content**: Includes the event title and narrative context (excludes the timing/timestamp).
+- **Final Milestone**: If this represents the final milestone of the main session, an explicit instruction is appended: "Final Milestone: acknowledge the end of the main session and give the user the option of continuing or slowing down towards recovery."
 
 ## 5. Short-Term Context Section (`short_term_context:`)
 Maintains continuity and prevents word repetition by supplying exactly the last 2 chronological responses to the user (e.g., the session intro and/or previous minute insights, chronologically ordered). If the session intro is no longer one of the last two responses, it is excluded to avoid over-anchoring.
@@ -48,9 +51,11 @@ Maintains continuity and prevents word repetition by supplying exactly the last 
 Streamlined real-time telemetry and coaching direction.
 
 - **BPM**: Current smoothed HR value.
-- **Coaching Direction**: The calculated directive for the user.
+- **Coaching Direction**: The calculated directive for the user. When in `BONUS_ACTIVE` mode, coaching direction is capped at `Maintain` (no requests to increase effort).
 - **Importance**: The calculated urgency for this update, formatted as a fraction of 10 (e.g., 5/10).
 - **Safety Flag**: Explicit alert if safety limits are breached.
+- **Bonus Active Mode Instruction (Conditional)**: Added when in `BONUS_ACTIVE`:
+  `Bonus Active Mode: The user has completed all objective requirements and is being encouraged to ramp heart rate down to a recovery mode.`
 - **Recovery Transition Instruction (Conditional)**: Added exclusively to the first periodic message sent after the user state changes to `RECOVERY` (on this packet, Coaching Direction is set to `Maintain` and Importance is set to `6/10`):
   `Recovery Transition: The user has successfully cooled down and the session is complete. Clearly announce that the workout is finished and they can stop whenever they like. Celebrate the victory and the [MAGUFFIN] briefly`
 

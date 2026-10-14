@@ -11,6 +11,7 @@ import { personalityData, resolveVerbalTic } from './personality';
 import { TRAINING_OBJECTIVES } from './training_objectives';
 import { generateMissionPlanTemplate } from './services/missionPlanGenerator';
 import { generateRandomizedNarrativeSection } from './narrativeRandomizer';
+import { FULL_VERSION_STRING, APP_VERSION } from './version';
 
 // --- Audio Decoding Utilities ---
 function decodeBase64(base64: string) {
@@ -851,6 +852,7 @@ const App: React.FC = () => {
     // --- FILE 1: FULL DEBUG LOG ---
     const filenameDebug = `session_${yyyy}${mm}${dd}${hh}${min}.txt`;
     let contentDebug = `AETHER AEGIS // SESSION LOG\n`;
+    contentDebug += `App Version: ${FULL_VERSION_STRING}\n`;
     contentDebug += `Generated: ${now.toLocaleString()}\n`;
     contentDebug += `Subject Age: ${age}\n`;
     contentDebug += `Subject Weight: ${weight} lbs\n`;
@@ -865,7 +867,7 @@ const App: React.FC = () => {
     }
     contentDebug += `ZONE COMPLIANCE: ${runningMetricsRef.current.compliantMinutes.toFixed(1)}/${performanceMinutes.toFixed(1)} active minutes (Total Wall Time: ${totalDurationMinutes}m)\n`;
     contentDebug += `Device ID: ${deviceIdHex}\n`;
-    contentDebug += `Personality: ${selectedPersona}\n`;
+    contentDebug += `Personality: ${selectedPersona} (v${PERSONA_CONFIG[selectedPersona]?.version || '1.0.0'})\n`;
     contentDebug += `Voice Profile: ${PERSONA_CONFIG[selectedPersona].voiceName}\n`;
     contentDebug += `Voice Threshold (Chattiness): ${chattiness}\n`;
     contentDebug += `Telemetry Abstraction: ${isTelemetryAbstractionEnabled}\n`;
@@ -980,6 +982,7 @@ const App: React.FC = () => {
     // --- FILE 2: USER SESSION SUMMARY (Concise) ---
     const filenameUser = `usersession_${yyyy}${mm}${dd}${hh}${min}.txt`;
     let contentUser = `AETHER AEGIS // USER SESSION SUMMARY\n`;
+    contentUser += `App Version: ${FULL_VERSION_STRING}\n`;
     contentUser += `Generated: ${now.toLocaleString()}\n`;
     contentUser += `Subject Age: ${age}\n`;
     contentUser += `Subject Weight: ${weight} lbs\n`;
@@ -1802,7 +1805,7 @@ ${sessionContext}${activityContext}
 
           narrativeMissionPlanRef.current = { prompt, text: narrativeText, tokenUsage, parsedValue };
 
-          // If a [BONUS] tag is present in the narrative plan, add a bonus milestone starting 5 minutes (300s) after the session target duration completes
+          // If a [BONUS] tag is present in the narrative plan, add repeating bonus milestones starting 5 minutes (300s) after target duration, repeating every 5 minutes
           if (parsedValue.bonus && parsedValue.bonus.length > 0) {
               const strategy = (currentObjective as any).transitionStrategy || "normal state";
               const isInterval = strategy === "interval state" || strategy === "fixed interval state";
@@ -1811,24 +1814,33 @@ ${sessionContext}${activityContext}
                   ? (intervalTime * 60 * 2) * intervalCountGoal 
                   : (sessionDurationGoal * 60);
 
-              let bonusTimeSeconds = baseTargetSeconds + 300; // 5 minutes after session target duration
+              // Repeat bonus milestones every 5 minutes (300s) up to 3 hours (180 mins) or at least 15 iterations
+              const maxSessionSeconds = Math.max(180 * 60, baseTargetSeconds + (60 * 60)); // at least 1 hr of overtime
+              let bonusIteration = 1;
 
-              // Ensure the bonus milestone doesn't conflict/overlap with any existing milestone (within 60 seconds)
-              while (parsedMilestones.some(m => Math.abs(m.timeInSeconds - bonusTimeSeconds) < 60)) {
-                  bonusTimeSeconds += 60; // Nudge forward by 1 minute if conflict
+              for (let bonusTimeSeconds = baseTargetSeconds + 300; bonusTimeSeconds <= maxSessionSeconds; bonusTimeSeconds += 300) {
+                  // Ensure this bonus milestone doesn't conflict/overlap with any existing milestone (within 60 seconds)
+                  let resolvedBonusSeconds = bonusTimeSeconds;
+                  while (parsedMilestones.some(m => Math.abs(m.timeInSeconds - resolvedBonusSeconds) < 60)) {
+                      resolvedBonusSeconds += 60; // Nudge forward by 1 minute if conflict
+                  }
+
+                  const bonusTimeMM = Math.floor(resolvedBonusSeconds / 60);
+                  const bonusTimeSS = Math.floor(resolvedBonusSeconds % 60);
+                  const bonusTimeLabel = `${bonusTimeMM}:${bonusTimeSS.toString().padStart(2, '0')}`;
+                  const bonusLabel = bonusIteration === 1 ? "Bonus Objective" : `Bonus Objective (+${bonusIteration * 5}m)`;
+
+                  parsedMilestones.push({
+                      timeInSeconds: resolvedBonusSeconds,
+                      timeLabel: bonusTimeLabel,
+                      label: bonusLabel,
+                      compliantNarrative: parsedValue.bonus,
+                      nonCompliantNarrative: parsedValue.bonus,
+                      narrative: parsedValue.bonus
+                  });
+                  bonusIteration++;
               }
 
-              const bonusTimeMM = Math.floor(bonusTimeSeconds / 60);
-              const bonusTimeSS = Math.floor(bonusTimeSeconds % 60);
-              const bonusTimeLabel = `${bonusTimeMM}:${bonusTimeSS.toString().padStart(2, '0')}`;
-              parsedMilestones.push({
-                  timeInSeconds: bonusTimeSeconds,
-                  timeLabel: bonusTimeLabel,
-                  label: "Bonus Objective",
-                  compliantNarrative: parsedValue.bonus,
-                  nonCompliantNarrative: parsedValue.bonus,
-                  narrative: parsedValue.bonus
-              });
               // Keep milestones chronologically sorted
               parsedMilestones.sort((a, b) => a.timeInSeconds - b.timeInSeconds);
           }
@@ -2115,10 +2127,13 @@ Last Minute Insight: ${lastSummary.insight || "N/A"}
     if (summary.milestoneLabel && summary.milestoneLabel !== "none") {
         const milestoneData = (narrativeMilestonesRef.current || []).find(m => m.label === summary.milestoneLabel);
         if (milestoneData) {
-            const sortedMilestones = [...(narrativeMilestonesRef.current || [])].sort((a, b) => a.timeInSeconds - b.timeInSeconds);
-            const isFinalMilestone = sortedMilestones.length > 0 && 
-                milestoneData.label === sortedMilestones[sortedMilestones.length - 1].label && 
-                milestoneData.timeInSeconds === sortedMilestones[sortedMilestones.length - 1].timeInSeconds;
+            // The final milestone of the main session is the last milestone that is NOT a bonus objective
+            const mainSessionMilestones = (narrativeMilestonesRef.current || [])
+                .filter(m => !m.label.startsWith("Bonus Objective"))
+                .sort((a, b) => a.timeInSeconds - b.timeInSeconds);
+            const isFinalMilestone = mainSessionMilestones.length > 0 && 
+                milestoneData.label === mainSessionMilestones[mainSessionMilestones.length - 1].label && 
+                milestoneData.timeInSeconds === mainSessionMilestones[mainSessionMilestones.length - 1].timeInSeconds;
 
             if (isFinalMilestone) {
                 isFinalMilestoneActive = true;

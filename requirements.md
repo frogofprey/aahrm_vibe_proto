@@ -70,10 +70,11 @@
         *   Upon entering `MAIN_ACTIVE`, `Active_Time` resets to **'0:00'**.
     *   **Cooldown & Delay**: A **25-second cooldown** is enforced between updates. If a `MAIN_ACTIVE` transition update (0:00) occurs too soon after a warmup update, it is delayed but preserves the '0:00' timestamp for narrative continuity.
 *   **Persona**: The AI must adopt one of the configurable personas, tailoring advice to the user's specific "Training Objective". Supported Personas:
-    *   **Arlie** (Tactical/Military, Voice: Zebenelgenubi)
-    *   **Eara** (Space/Sci-Fi, Voice: Charon)
-    *   **Pounce** (Playful/Cat-like, Voice: Puck)
-    *   **Sage** (Zen/Focus, Voice: Fenrir)
+    *   **Arlie** (Tactical/Military, Voice: `Zebenelgenubi`, Version: `v1.0.0`)
+    *   **Chad** (Gym-Bro Rivalry, Voice: `Algieba`, Version: `v1.0.0`)
+    *   **Ginger-Chan** (Cat-Girl VTuber Boss Battle, Voice: `Leda`, Version: `v1.0.0`)
+    *   **Friday** (Gothic Poet / Entropy, Voice: `Kore`, Version: `v1.0.0`)
+    *   **Kaelen** (Gothic-Noble Vampire / Dungeon Crawl, Voice: `Sulafat`, Version: `v1.0.0`)
 
 ### 5. Frontend Presentation Layer
 *   **Decoupled UI Specification**: The full system presentation architecture, visual guidelines, bento layout grid, dynamic telemetry visualizations, interactive charting, settings groupings, and debug log views are moved to the dedicated **[requirements_react.md](./requirements_react.md)** file.
@@ -90,4 +91,4 @@
 *   **Frontend**: React (Vite) + Tailwind CSS.
 *   **Backend**: Express (for serving and proxying if needed).
 *   **WebSocket**: Primary protocol for HR telemetry input.
-*   **AI SDK**: @google/generative-ai.
+*   **AI SDK**: `@google/genai` (modern Google GenAI SDK).

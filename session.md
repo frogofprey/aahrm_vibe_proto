@@ -7,10 +7,11 @@ The **Session Log** is a comprehensive "Black Box" recording of the entire worko
 ## 1. Header & Configuration
 Contains the static configuration and final aggregated stats for the session.
 
+*   **App & Code Version**: Full application release and build identifier (e.g., `App Version: v0.86.0+build.M1ABC9`).
 *   **Subject Data**: Age, Weight, Gender, **Activity** (e.g., "Running").
 *   **Mission Config**: Training Goal, Strategy, Target Objectives (Time/Intervals).
 *   **Final Aggregates**: Total Calories, Total Heart Points, **Intervals Completed** (if applicable), Zone Compliance (Performance Minutes / Active Minutes).
-*   **System Config**: Device ID, Personality, Voice Profile, Chattiness Threshold, **Telemetry Abstraction** (Enabled/Disabled).
+*   **System Config**: Device ID, Personality (including persona version, e.g., `Arlie (v1.0.0)`), Voice Profile, Chattiness Threshold, **Telemetry Abstraction** (Enabled/Disabled).
 *   **Final Report**: The text of the final spoken summary + Token Usage.
 *   **State Transition History**: A timestamped log of every state change (e.g., `INIT -> WARMUP -> MAIN_ACTIVE -> PAUSE -> BONUS_ACTIVE -> RECOVERY`) and the triggering reason. Transitions are driven by heart rate thresholds with a 6-second debounce.
 

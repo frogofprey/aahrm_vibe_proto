@@ -11,6 +11,8 @@ The root object is a Dictionary (Key-Value pair) where:
 ## Schema Definition
 
 ```typescript
+export const PERSONALITY_DATA_VERSION = "1.0.0";
+
 interface VerbalTicOption {
   value: string;
   weight: number;              // Dynamic variant weighting relative to each other (e.g. 0.8 for "Meow", 0.2 for "Nyaa")
@@ -26,6 +28,11 @@ interface VerbalTicConfig {
 }
 
 interface PersonaConfig {
+  /**
+   * Version of the persona definition (e.g., "1.0.0").
+   */
+  version?: string;
+
   /**
    * The core system instruction defining the AI's personality, backstory, 
    * and attitude towards the user and the workout data.
@@ -68,10 +75,19 @@ interface PersonaConfig {
 }
 ```
 
+## Active Personas
+
+* **Arlie** (`v1.0.0`, Voice: `Zubenelgenubi`): Hardened space marine combat trainer.
+* **Chad** (`v1.0.0`, Voice: `Algieba`): Arrogant gym-bro locked in a one-sided pride competition.
+* **Ginger-Chan** (`v1.0.0`, Voice: `Leda`): AI Cat-Girl vtuber treating the workout as an action MMO boss battle.
+* **Friday** (`v1.0.0`, Voice: `Kore`): Gothic researcher / poet of the void speaking in rhythmic prose.
+* **Kaelen** (`v1.0.0`, Voice: `Sulafat`): Gothic-noble half-vampire bound by an ancient pact in a dungeon crawl.
+
 ## Example Entry
 
 ```json
 "Ginger-Chan": {
+  "version": "1.0.0",
   "systemInstruction": "You are Ginger-Chan, an AI Cat-Girl vtuber...",
   "missionProfile": "You view the session as a video game boss battle...",
   "missionWeight": 0.7,

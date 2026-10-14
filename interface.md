@@ -63,7 +63,8 @@ The default screen uses a multi-faceted **Bento Grid** designed to fill a standa
 ### Component A: DashboardHeader
 *   **File Origin**: `/src/components/DashboardHeader.tsx`
 *   **Characterization**: Serves as the central administration and calibration rig.
-*   **Input Controls**:
+*   **Visual Indicators & Controls**:
+    *   `Version Badge`: Displays the active app release version (`v0.86.0`) with build identifier tooltip next to the AetherAegis title.
     *   `Age` Input: Numeric value (range: 10-120), triggers zone recomputation instantly.
     *   `Weight` Input: Numeric decimal, drives metabolic calorie burn calculations.
     *   `Gender` Selector: Dropdown setting modifiers for basal profiles.
@@ -79,6 +80,7 @@ The default screen uses a multi-faceted **Bento Grid** designed to fill a standa
     *   Animated SVG or SVG background heart outline running at an SVG pulse speed linked to current BPM frequency.
     *   Color spectrum animations representing transitions between different heart rate zones.
     *   Min/Max boundary overlays showing safety metrics and zone transition ceilings.
+    *   **Live Compliance HUD (Full-Screen Mode)**: Displays real-time `PASS` / `FAIL` / `READY` status badge, running performance minute compliance ratio (`X.X / Y.Y min (Z.Z%)`), and target indicator (`[Goal: ≥80%]`).
 
 ### Component C: AggregatorPanel
 *   **File Origin**: `/src/components/AggregatorPanel.tsx`

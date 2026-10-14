@@ -10,12 +10,16 @@ Used to establish the story arc for the session. Structured using XML-like tags,
 - **General Instructions**: Role definition (expert author/narrative creator).
 - **Requirements**: 
     - Recontextualization of workout goals.
-    - Milestone definition (narrative events spaced throughout the session).
+    - Milestone definition with **dual Pass/Fail branches**:
+      - `Pass: [Thematic victory narrative]` (used when cumulative compliance is met).
+      - `Fail: [Humorous/ironic complication narrative]` (used when cumulative compliance is missed).
     - Mission Complete/Maguffin/Antagonist/Protagonist definition.
-    - Bonus/Overtime context.
+    - Bonus/Overtime context (`[BONUS]` tag parsed as a bonus milestone scheduled 5 minutes after session target duration without overlap).
     - Structural matching (Intervals vs. Time).
-- **Constraints**: Hard constraint against markdown.
-- **Output Format**: Template for the mission plan.
+- **Constraints**: 
+    - Hard constraint against markdown in final values.
+    - Strict adherence to output format `M:SS [Label] || Pass: [...] || Fail: [...]`.
+- **Output Format**: Template for the mission plan generated via `missionPlanGenerator.ts`.
 
 ### `<persona>`
 - **Identity**: Core character traits.

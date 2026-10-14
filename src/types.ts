@@ -128,6 +128,7 @@ export interface VerbalTicConfig {
 }
 
 export interface PersonaConfig {
+  version?: string;
   systemInstruction: string;
   missionProfile: string;
   missionWeight: number;

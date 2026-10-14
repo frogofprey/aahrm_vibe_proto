@@ -5,6 +5,7 @@ The **User Session Summary** is a concise, human-readable log designed for train
 **Filename Format**: `usersession_YYYYMMDDHHMM.txt`
 
 ## 1. Header
+*   **App & Code Version**: Full release string (e.g., `App Version: v0.86.0+build.M1ABC9`).
 *   **Timestamp**: Date and time of generation.
 *   **Subject Config**: Age, Weight, **Activity**.
 *   **Goals**: Training Goal, specific Objectives (e.g., "Time 20m" or "3 Intervals").
