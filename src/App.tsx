@@ -2454,11 +2454,16 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
     else if (avgHr >= zone2Min) points = 1;
 
     // --- Compliance Logic ---
+    // Warmup period for non-interval sessions does not compute compliance.
+    const isWarmupFrame = effectiveFrameState === SessionState.WARMUP || effectiveFrameState === SessionState.INIT;
     // Allow for a 3 BPM margin to be "close enough"
     let isCompliant = false;
     const margin = 3;
 
-    if (strategy === "fixed state - MAIN_ACTIVE") {
+    if (!isIntervalStrategy && isWarmupFrame) {
+        // Explicitly no compliance during warmup for non-interval sessions
+        isCompliant = false;
+    } else if (strategy === "fixed state - MAIN_ACTIVE") {
         isCompliant = true;
     } else if (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY) {
         // For interval recovery, compliance means staying below the recovery ceiling
@@ -2506,10 +2511,12 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
     runningMetricsRef.current.calories += calories;
     
     // Only increment Compliance Denominator if in active performance states
+    // Strictly exclude warmup/init frames for non-interval sessions.
     // For interval based objectives, time spent in the correct zone while in recovery phase should also count for compliance. 
-    const isPerformanceState = effectiveFrameState === SessionState.MAIN_ACTIVE || 
+    const isPerformanceState = (effectiveFrameState === SessionState.MAIN_ACTIVE || 
                                effectiveFrameState === SessionState.BONUS_ACTIVE ||
-                               (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY);
+                               (isIntervalStrategy && effectiveFrameState === SessionState.RECOVERY)) &&
+                               (!isWarmupFrame);
     
     if (isPerformanceState) {
         // Each minute summary packet corresponds to a 1-minute interval window
@@ -2675,8 +2682,10 @@ Importance: ${packetImportance}/10${summary.safetyAlert ? "\nSafety Flag: ON" : 
     allSessionSummariesRef.current.push(newSummary);
 
     setSummaries(prev => [newSummary, ...prev].slice(0, 3));
-    addLog(`AGGREGATOR: Minute Packet [${timestamp}] generated.`);
-    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${isCompliant ? 'PASS' : 'FAIL'} | Importance: ${importance}/10`);
+    const complianceLogStr = (!isIntervalStrategy && isWarmupFrame) 
+        ? 'N/A (WARMUP)' 
+        : (isCompliant ? 'PASS' : 'FAIL');
+    addLog(`METRICS: +${points} HP | +${calories.toFixed(1)} kcal | Compliance: ${complianceLogStr} | Importance: ${importance}/10`);
     console.log(`METRICS: Minute Packet [${timestamp}] | HR: (Avg ${avgHr} / Smoothed ${smoothedHR}) | Target Zone: ${targetZoneInfo} | Coaching: ${coachingDirection} | Importance: ${importance}/10`);
     addLog(`STATE_FRAME: ${effectiveFrameState} (Current: ${currentSessionState})`);
     
